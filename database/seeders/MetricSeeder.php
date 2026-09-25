@@ -10,7 +10,8 @@ use Illuminate\Support\Facades\DB;
 
 /**
  * Simulates a week of background checks for every collected service, with the
- * occasional outage and slow spell, so the monitoring pages have something to show.
+ * occasional outage and slow spell, plus what Influx Daemon services' hosts reported,
+ * so the monitoring pages have something to show.
  */
 class MetricSeeder extends Seeder
 {
@@ -30,11 +31,16 @@ class MetricSeeder extends Seeder
     public function run(): void
     {
         Service::each(function (Service $service): void {
-            if (! $service->isCollectingMetrics()) {
+            // Services seeded earlier already have their history.
+            if (! $service->isCollectingMetrics() || $service->metrics()->exists()) {
                 return;
             }
 
             $this->simulate($service);
+
+            if ($service->type === ServiceType::InfluxDaemon) {
+                $this->simulateDaemon($service);
+            }
         });
     }
 
@@ -90,6 +96,51 @@ class MetricSeeder extends Seeder
         }
 
         Service::withoutTimestamps(fn () => $service->forceFill(['last_checked_at' => $now->copy()->subSeconds(self::INTERVAL)])->saveQuietly());
+    }
+
+    /**
+     * Simulate a host's minutes of daemon samples: a daily rhythm of CPU, memory and
+     * traffic, with a few containers of which one is occasionally unhealthy.
+     */
+    protected function simulateDaemon(Service $service): void
+    {
+        $now = now();
+        $start = $now->copy()->subDays(self::DAYS)->startOfMinute();
+        $memoryTotal = 16 * 1024 ** 3;
+        $containers = fake()->numberBetween(3, 8);
+        $rows = [];
+
+        for ($time = $start; $time->lt($now); $time = $time->addSeconds(self::INTERVAL)) {
+            // Busiest in the afternoon, quietest overnight.
+            $load = (1 - cos(2 * M_PI * ($time->hour + $time->minute / 60 - 3) / 24)) / 2;
+            $cpu = min(100, 5 + 55 * $load + fake()->randomFloat(2, 0, 10));
+
+            $rows[] = [
+                'service_id' => $service->id,
+                'minute' => $time->toDateTimeString(),
+                'samples' => 12,
+                'seconds' => 60,
+                'cpu_percent' => round($cpu, 2),
+                'cpu_percent_max' => round(min(100, $cpu + fake()->randomFloat(2, 0, 25)), 2),
+                'load_1' => round($cpu / 25, 2),
+                'memory_used_bytes' => (int) ($memoryTotal * (0.35 + 0.3 * $load + fake()->randomFloat(3, 0, 0.05))),
+                'memory_total_bytes' => $memoryTotal,
+                'swap_used_bytes' => 0,
+                // The fullest disk fills up slowly over the week.
+                'disk_used_percent' => round(60 + 8 * $start->diffInSeconds($time) / $start->diffInSeconds($now), 2),
+                'disk_read_bytes' => (int) (60 * (0.5 + 4 * $load) * 1024 ** 2 * fake()->randomFloat(2, 0.5, 1.5)),
+                'disk_write_bytes' => (int) (60 * (0.3 + 2 * $load) * 1024 ** 2 * fake()->randomFloat(2, 0.5, 1.5)),
+                'network_rx_bytes' => (int) (60 * (0.2 + 8 * $load) * 1024 ** 2 * fake()->randomFloat(2, 0.5, 1.5)),
+                'network_tx_bytes' => (int) (60 * (0.1 + 3 * $load) * 1024 ** 2 * fake()->randomFloat(2, 0.5, 1.5)),
+                'containers_total' => $containers,
+                'containers_running' => $containers - (fake()->boolean(3) ? 1 : 0),
+                'containers_unhealthy' => fake()->boolean(2) ? 1 : 0,
+            ];
+        }
+
+        foreach (array_chunk($rows, 500) as $chunk) {
+            DB::table('daemon_metrics')->insert($chunk);
+        }
     }
 
     /**

@@ -2,7 +2,6 @@
 
 namespace Tests\Feature\Monitoring;
 
-use App\Enums\ServiceType;
 use App\Models\Service;
 use App\Monitoring\Checkers\TcpChecker;
 use App\Monitoring\CheckResult;
@@ -93,14 +92,5 @@ class ServiceMonitorTest extends TestCase
         $this->assertFalse($metric->successful);
         $this->assertSame('Something broke', $metric->error);
         $this->assertSame(1, $service->incidents()->ongoing()->count());
-    }
-
-    public function test_influx_daemon_services_are_not_checked()
-    {
-        $service = Service::factory()->create(['type' => ServiceType::InfluxDaemon]);
-
-        $this->assertNull(app(ServiceMonitor::class)->check($service));
-        $this->assertSame(0, $service->metrics()->count());
-        $this->assertNull($service->fresh()->last_checked_at);
     }
 }

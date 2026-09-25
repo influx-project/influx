@@ -3,6 +3,7 @@
 use App\Http\Controllers\Admin\OverviewController;
 use App\Http\Controllers\Admin\ServiceController;
 use App\Http\Controllers\Admin\UserController;
+use App\Http\Controllers\DaemonTokenController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware(['auth', 'verified', 'admin'])
@@ -14,6 +15,7 @@ Route::middleware(['auth', 'verified', 'admin'])
         Route::resource('services', ServiceController::class);
         Route::get('services/{service}/downtime', [ServiceController::class, 'downtime'])->name('services.downtime');
         Route::get('services/{service}/daemon', [ServiceController::class, 'daemon'])->name('services.daemon');
+        Route::post('services/{service}/daemon/token', DaemonTokenController::class)->name('services.daemon.token');
         Route::get('services/{service}/alerts', [ServiceController::class, 'alerts'])->name('services.alerts');
         Route::get('services/{service}/information', [ServiceController::class, 'information'])->name('services.information');
     });

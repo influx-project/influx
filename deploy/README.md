@@ -15,7 +15,7 @@ Everything runs with Docker Compose on a single server. You can run it with HTTP
 | `postgres`   | Database.                                                                                     |
 | `redis`      | Cache, sessions and job queues.                                                               |
 
-All the app services use the same image, built from [`Dockerfile`](Dockerfile).
+All the app services use the same image, `ghcr.io/influx-project/influx-panel`. It is built from [`Dockerfile`](Dockerfile) and published to GitHub Packages for amd64 and arm64 on every commit to `main`, so the server doesn't need to build anything.
 
 ## Requirements
 
@@ -44,7 +44,7 @@ Open `.env` and set the required values.
 | `REVERB_APP_ID`     | any number, e.g. `123456`                                                |
 | `REVERB_APP_KEY`    | `openssl rand -hex 16`                                                   |
 | `REVERB_APP_SECRET` | `openssl rand -hex 32`                                                   |
-| `APP_KEY`           | after building in step 3: `docker compose run --rm --no-deps migrate php artisan key:generate --show` |
+| `APP_KEY`           | after pulling in step 3: `docker compose run --rm --no-deps migrate php artisan key:generate --show` |
 
 Then choose **one** of the following.
 
@@ -74,10 +74,10 @@ Use the server's IP address or hostname in `APP_URL`. The site is served over pl
 
 To use a different port, e.g. 8080, set `HTTP_PORT=8080` and include it in the URL: `APP_URL=http://203.0.113.10:8080`.
 
-## 3. Build and start
+## 3. Pull and start
 
 ```bash
-docker compose build
+docker compose pull
 docker compose run --rm --no-deps migrate php artisan key:generate --show
 ```
 
@@ -87,7 +87,7 @@ Paste the printed `base64:...` value into `APP_KEY` in `.env`, then start everyt
 docker compose up -d
 ```
 
-The first build takes a few minutes. Check that everything is running:
+Check that everything is running:
 
 ```bash
 docker compose ps
@@ -113,11 +113,32 @@ Accounts must verify their email address before they can use the app. To let oth
 
 ```bash
 git pull
-docker compose build
+docker compose pull
 docker compose up -d
 ```
 
 Migrations run automatically on start.
+
+### Choosing a version
+
+By default you run `latest`, the newest commit on `main`. To stay on a specific version, set `APP_TAG` in `.env`:
+
+| `APP_TAG`      | What you get                                   |
+| -------------- | ---------------------------------------------- |
+| `latest`       | The newest commit on `main` (default).         |
+| `1.2` / `1.2.3` | A release, from the `v1.2.3` Git tag.          |
+| `sha-abc1234`  | One exact commit, e.g. to roll back.           |
+
+### Building the image yourself
+
+To run local changes, or a fork, build from this checkout instead of pulling:
+
+```bash
+docker compose build
+docker compose up -d
+```
+
+Set `APP_IMAGE` in `.env` to use a different image name, e.g. your fork's `ghcr.io/<you>/influx-panel`.
 
 ## Everyday operations
 

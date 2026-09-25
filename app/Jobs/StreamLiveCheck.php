@@ -2,8 +2,11 @@
 
 namespace App\Jobs;
 
+use App\Enums\ServiceType;
+use App\Events\DaemonSampleReceived;
 use App\Events\LiveCheckCompleted;
 use App\Models\Service;
+use App\Monitoring\Checkers\DaemonChecker;
 use App\Monitoring\LiveViewers;
 use App\Monitoring\ServiceMonitor;
 use Illuminate\Contracts\Queue\ShouldBeUniqueUntilProcessing;
@@ -69,7 +72,7 @@ class StreamLiveCheck implements ShouldBeUniqueUntilProcessing, ShouldQueue
     /**
      * Execute the job.
      */
-    public function handle(ServiceMonitor $monitor, LiveViewers $viewers): void
+    public function handle(ServiceMonitor $monitor, DaemonChecker $daemons, LiveViewers $viewers): void
     {
         $id = $this->service->id;
 
@@ -87,11 +90,18 @@ class StreamLiveCheck implements ShouldBeUniqueUntilProcessing, ShouldQueue
         Cache::put(self::lastCheckKey($id), true, self::STALE_AFTER);
 
         $startedAt = now();
-        $result = $monitor->probe($this->service);
 
-        if ($result !== null) {
-            LiveCheckCompleted::dispatch($this->service, $result, $startedAt);
+        if ($this->service->type === ServiceType::InfluxDaemon) {
+            ['result' => $result, 'sample' => $sample] = $daemons->snapshot($this->service);
+
+            if ($sample !== null) {
+                DaemonSampleReceived::dispatch($this->service, $sample);
+            }
+        } else {
+            $result = $monitor->probe($this->service);
         }
+
+        LiveCheckCompleted::dispatch($this->service, $result, $startedAt);
 
         // Keep a steady cadence however long the check itself took.
         $next = $startedAt->addSeconds(self::INTERVAL);

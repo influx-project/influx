@@ -42,6 +42,7 @@ export default function AdminServiceDaemonPage({
             >
                 <ServiceDaemon
                     service={service}
+                    status={status}
                     daemon={daemon}
                     range={range}
                     ranges={ranges}

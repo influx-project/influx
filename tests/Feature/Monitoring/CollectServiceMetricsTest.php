@@ -29,13 +29,14 @@ class CollectServiceMetricsTest extends TestCase
         Service::withoutTimestamps(fn () => $notDue->forceFill(['next_check_at' => now()->addMinute()])->saveQuietly());
         Service::factory()->disabled()->create();
         Service::factory()->create(['collect_metrics' => false]);
-        Service::factory()->create(['type' => ServiceType::InfluxDaemon]);
+        $daemon = Service::factory()->create(['type' => ServiceType::InfluxDaemon]);
 
         $this->artisan('services:collect-metrics')
-            ->expectsOutputToContain('Queued 2 checks.')
+            ->expectsOutputToContain('Queued 3 checks.')
             ->assertSuccessful();
 
-        Queue::assertPushed(CheckService::class, 2);
+        Queue::assertPushed(CheckService::class, 3);
+        Queue::assertPushed(CheckService::class, fn (CheckService $job) => $job->service->is($daemon));
         Queue::assertPushed(CheckService::class, fn (CheckService $job) => $job->service->is($never));
         Queue::assertPushed(CheckService::class, fn (CheckService $job) => $job->service->is($overdue));
         $this->assertTrue($never->fresh()->next_check_at->equalTo(now()->addSeconds(120)));
@@ -68,7 +69,7 @@ class CollectServiceMetricsTest extends TestCase
 
         $this->mock(ServiceMonitor::class, fn (MockInterface $mock) => $mock->shouldNotReceive('check'));
 
-        (new CheckService($service))->handle(app(ServiceMonitor::class));
+        app()->call([new CheckService($service), 'handle']);
     }
 
     public function test_the_job_is_unique_per_service()

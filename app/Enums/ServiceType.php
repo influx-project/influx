@@ -14,6 +14,11 @@ enum ServiceType: string
     case InfluxDaemon = 'influx_daemon';
 
     /**
+     * The port Influx Daemon listens on by default.
+     */
+    public const INFLUX_DAEMON_PORT = 7462;
+
+    /**
      * Get the human readable label for the type.
      */
     public function label(): string
@@ -39,35 +44,18 @@ enum ServiceType: string
     }
 
     /**
-     * Determine whether services of this type are checked by the background collector.
-     */
-    public function collectsMetrics(): bool
-    {
-        return $this !== self::InfluxDaemon;
-    }
-
-    /**
-     * Get every type the background collector can check.
-     *
-     * @return list<self>
-     */
-    public static function collectable(): array
-    {
-        return array_values(array_filter(self::cases(), fn (self $type): bool => $type->collectsMetrics()));
-    }
-
-    /**
      * Get the port conventionally used by this type, if any.
      */
     public function defaultPort(bool $useSsl = false): ?int
     {
         return match ($this) {
             self::Http => $useSsl ? 443 : 80,
-            self::Tcp, self::Ping, self::InfluxDaemon => null,
+            self::Tcp, self::Ping => null,
             self::Ssh => 22,
             self::Database => 3306,
             self::Dns => 53,
             self::Smtp => $useSsl ? 465 : 25,
+            self::InfluxDaemon => self::INFLUX_DAEMON_PORT,
         };
     }
 

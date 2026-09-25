@@ -257,10 +257,11 @@ class LiveUpdatesTest extends TestCase
         Cache::put(StreamLiveCheck::lastCheckKey($running->id), true, StreamLiveCheck::STALE_AFTER);
         $this->watching([$stalled->id, $running->id, $liveOff->id, $daemon->id]);
 
-        $this->artisan('services:stream-live')->expectsOutputToContain('Restarted live checks for 1 service.');
+        $this->artisan('services:stream-live')->expectsOutputToContain('Restarted live checks for 2 services.');
 
-        Queue::assertPushed(StreamLiveCheck::class, 1);
+        Queue::assertPushed(StreamLiveCheck::class, 2);
         Queue::assertPushed(StreamLiveCheck::class, fn (StreamLiveCheck $job) => $job->service->is($stalled));
+        Queue::assertPushed(StreamLiveCheck::class, fn (StreamLiveCheck $job) => $job->service->is($daemon));
     }
 
     public function test_the_command_does_nothing_when_no_one_is_watching()

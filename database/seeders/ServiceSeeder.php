@@ -18,6 +18,7 @@ class ServiceSeeder extends Seeder
             Service::factory()->for($user, 'owner')->https()->importance(ServiceImportance::Critical)->create();
             Service::factory()->for($user, 'owner')->ping()->create();
             Service::factory()->for($user, 'owner')->count(3)->create();
+            Service::factory()->for($user, 'owner')->influxDaemon()->create(['name' => 'Local host', 'host' => '127.0.0.1']);
         });
 
         Service::factory()->unassigned()->count(2)->create();

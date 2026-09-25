@@ -152,7 +152,7 @@ function CheckSchedule({
     service: Service;
     status: ServiceStatus;
 }) {
-    if (status.state === 'paused' || status.state === 'unsupported') {
+    if (status.state === 'paused') {
         return null;
     }
 

@@ -20,7 +20,7 @@ import {
 } from '@/lib/live-check-cache';
 import { formatLatency, formatRelative } from '@/lib/format';
 import { cn } from '@/lib/utils';
-import type { LiveCheck, Service, ServiceStatus } from '@/types';
+import type { LiveCheck, Service } from '@/types';
 import type { RouteDefinition } from '@/wayfinder';
 import { LiveBadge } from './live-badge';
 import { LiveHeartbeat, LiveLatencyChart } from './live-charts';
@@ -33,18 +33,13 @@ const STALLED_AFTER = 20;
  */
 export function LivePanel({
     service,
-    status,
     settingsHref,
 }: {
     service: Service;
-    status: ServiceStatus;
     settingsHref: RouteDefinition<'get'>;
 }) {
     const [preferred, setPreferred] = useLiveUpdatesPreference();
-    const available =
-        service.enabled &&
-        service.stream_metrics &&
-        status.state !== 'unsupported';
+    const available = service.enabled && service.stream_metrics;
     const live = available && preferred;
 
     return (
@@ -82,7 +77,6 @@ export function LivePanel({
                 ) : (
                     <LiveOffMessage
                         service={service}
-                        status={status}
                         available={available}
                         settingsHref={settingsHref}
                     />
@@ -94,12 +88,10 @@ export function LivePanel({
 
 function LiveOffMessage({
     service,
-    status,
     available,
     settingsHref,
 }: {
     service: Service;
-    status: ServiceStatus;
     available: boolean;
     settingsHref: RouteDefinition<'get'>;
 }) {
@@ -108,15 +100,6 @@ function LiveOffMessage({
             <p className="text-sm text-muted-foreground">
                 Live updates are switched off in this browser. Switch them on to
                 watch checks as they happen.
-            </p>
-        );
-    }
-
-    if (status.state === 'unsupported') {
-        return (
-            <p className="text-sm text-muted-foreground">
-                Live updates aren't available for {service.type_label} services
-                yet.
             </p>
         );
     }

@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Carbon;
+use LogicException;
 
 /**
  * A monitored endpoint such as a web server, database or SSH port.
@@ -41,6 +42,8 @@ use Illuminate\Support\Carbon;
  * @property-read Collection<int, Incident> $incidents
  * @property-read Metric|null $latestMetric
  * @property-read Incident|null $ongoingIncident
+ * @property-read Daemon|null $daemon
+ * @property-read Collection<int, DaemonMetric> $daemonMetrics
  */
 #[Fillable([
     'name',
@@ -186,11 +189,48 @@ class Service extends Model
     }
 
     /**
+     * Get how the panel connects to the service's Influx Daemon, for Influx Daemon services.
+     *
+     * @return HasOne<Daemon, $this>
+     */
+    public function daemon(): HasOne
+    {
+        return $this->hasOne(Daemon::class);
+    }
+
+    /**
+     * Get how the panel connects to the service's Influx Daemon, creating it with a new token if need be.
+     *
+     * Created on first use rather than with the service, so services that became Influx Daemon
+     * services any other way, such as by seeding or before the table existed, still get a token.
+     */
+    public function ensureDaemon(): Daemon
+    {
+        if ($this->type !== ServiceType::InfluxDaemon) {
+            throw new LogicException("Service {$this->id} is not an Influx Daemon service.");
+        }
+
+        $daemon = $this->daemon ?? $this->daemon()->createOrFirst([], ['token' => Daemon::generateToken()]);
+
+        return $this->setRelation('daemon', $daemon)->daemon;
+    }
+
+    /**
+     * Get the minutes of samples pulled from the service's Influx Daemon.
+     *
+     * @return HasMany<DaemonMetric, $this>
+     */
+    public function daemonMetrics(): HasMany
+    {
+        return $this->hasMany(DaemonMetric::class);
+    }
+
+    /**
      * Determine whether the background collector checks this service.
      */
     public function isCollectingMetrics(): bool
     {
-        return $this->enabled && $this->collect_metrics && $this->type->collectsMetrics();
+        return $this->enabled && $this->collect_metrics;
     }
 
     /**
@@ -198,7 +238,7 @@ class Service extends Model
      */
     public function isStreamingLive(): bool
     {
-        return $this->enabled && $this->stream_metrics && $this->type->collectsMetrics();
+        return $this->enabled && $this->stream_metrics;
     }
 
     /**

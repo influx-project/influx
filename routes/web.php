@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\DaemonTokenController;
 use App\Http\Controllers\ServiceController;
 use Illuminate\Support\Facades\Route;
 
@@ -10,6 +11,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::resource('services', ServiceController::class);
     Route::get('services/{service}/downtime', [ServiceController::class, 'downtime'])->name('services.downtime');
     Route::get('services/{service}/daemon', [ServiceController::class, 'daemon'])->name('services.daemon');
+    Route::post('services/{service}/daemon/token', DaemonTokenController::class)->name('services.daemon.token');
     Route::get('services/{service}/alerts', [ServiceController::class, 'alerts'])->name('services.alerts');
     Route::get('services/{service}/information', [ServiceController::class, 'information'])->name('services.information');
 });

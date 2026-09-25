@@ -2,9 +2,12 @@
 
 namespace App\Concerns;
 
+use App\Enums\ServiceType;
 use App\Http\Resources\IncidentResource;
 use App\Http\Resources\ServiceResource;
 use App\Models\Service;
+use App\Monitoring\Daemon\DaemonClient;
+use App\Monitoring\Daemon\DaemonReport;
 use App\Monitoring\ServiceReport;
 use App\Monitoring\TimeRange;
 use Illuminate\Http\Request;
@@ -47,8 +50,6 @@ trait PresentsServiceMonitoring
     /**
      * Get the props for the daemon tab: what the Influx Daemon reported about its host and containers.
      *
-     * The panel does not pull from the daemon yet (see docs/influx-daemon.md), so nothing has been reported.
-     *
      * @return array<string, mixed>
      */
     protected function daemonProps(Request $request, Service $service): array
@@ -59,9 +60,27 @@ trait PresentsServiceMonitoring
             ...$this->serviceTabProps($service),
             'range' => $range->value,
             'ranges' => TimeRange::options(),
-            'daemon' => [
-                'agent' => null,
-                'last_seen_at' => null,
+            'daemon' => app(DaemonReport::class)->summary($service, $range),
+        ];
+    }
+
+    /**
+     * Get how to connect an Influx Daemon to the panel, for the settings of Influx Daemon services.
+     *
+     * Only for people who can update the service, since the token grants access to the daemon.
+     *
+     * @return array<string, mixed>
+     */
+    protected function daemonConnectionProps(Service $service): array
+    {
+        if ($service->type !== ServiceType::InfluxDaemon) {
+            return ['daemon_connection' => null];
+        }
+
+        return [
+            'daemon_connection' => [
+                'token' => $service->ensureDaemon()->token,
+                'url' => DaemonClient::for($service)->baseUrl(),
             ],
         ];
     }

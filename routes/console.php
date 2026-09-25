@@ -2,6 +2,7 @@
 
 use App\Console\Commands\CollectServiceMetrics;
 use App\Console\Commands\StreamLiveChecks;
+use App\Models\DaemonMetric;
 use App\Models\Metric;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
@@ -19,4 +20,4 @@ Schedule::command(CollectServiceMetrics::class)->everyTenSeconds()->withoutOverl
 // restarts any that broke along the way.
 Schedule::command(StreamLiveChecks::class)->everyMinute()->withoutOverlapping(1);
 
-Schedule::command('model:prune', ['--model' => [Metric::class]])->daily();
+Schedule::command('model:prune', ['--model' => [Metric::class, DaemonMetric::class]])->daily();

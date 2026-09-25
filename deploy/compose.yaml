@@ -2,14 +2,18 @@
 #
 #   cd deploy
 #   cp .env.example .env    # then fill it in
-#   docker compose build
+#   docker compose pull
 #   docker compose up -d
+#
+# The app image is published to GitHub Packages on every commit to main. To build it
+# from this checkout instead, run `docker compose build` before `up`.
 
 name: influx
 
-# Shared by every service that runs the application image.
+# Shared by every service that runs the application image. Pin APP_TAG to a release
+# (e.g. 1.2) or commit (sha-abc1234) to stop `pull` moving you to the latest main.
 x-app: &app
-  image: ${APP_IMAGE:-influx-project}:${APP_TAG:-latest}
+  image: ${APP_IMAGE:-ghcr.io/influx-project/influx-panel}:${APP_TAG:-latest}
   env_file: .env
   environment:
     # Fixed for this deployment; everything else comes from .env.

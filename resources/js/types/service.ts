@@ -65,9 +65,8 @@ export type ServiceFilters = {
  *
  * - `pending`: collecting, but not checked yet
  * - `paused`: monitoring or background collection is switched off
- * - `unsupported`: the type is not checked by the background collector
  */
-export type ServiceState = 'up' | 'down' | 'pending' | 'paused' | 'unsupported';
+export type ServiceState = 'up' | 'down' | 'pending' | 'paused';
 
 export type ServiceCheck = {
     id: number;
@@ -196,11 +195,51 @@ export type DaemonAgent = {
     containers_available: boolean;
 };
 
+/** One bucket of a daemon's history; the figures are null where no samples were stored. */
+export type DaemonSeriesPoint = {
+    time: string;
+    cpu_percent: number | null;
+    cpu_percent_max: number | null;
+    memory_percent: number | null;
+    disk_read_bytes_per_second: number | null;
+    disk_write_bytes_per_second: number | null;
+    network_rx_bytes_per_second: number | null;
+    network_tx_bytes_per_second: number | null;
+    /** Null when there are no samples, or the daemon could not see a container runtime. */
+    containers_running: number | null;
+    containers_unhealthy: number | null;
+    containers_total: number | null;
+};
+
+export type DaemonHistory = {
+    stats: {
+        samples: number;
+        cpu_percent: number | null;
+        cpu_percent_max: number | null;
+        memory_percent: number | null;
+        /** How full the fullest disk was in the latest sample. */
+        disk_used_percent: number | null;
+        network_rx_bytes: number;
+        network_tx_bytes: number;
+        containers_running: number | null;
+        containers_total: number | null;
+    };
+    series: DaemonSeriesPoint[];
+};
+
 /** What the panel knows about a service's Influx Daemon. */
 export type ServiceDaemon = {
     /** Null until the panel has reached the daemon. */
     agent: DaemonAgent | null;
     last_seen_at: string | null;
+    history: DaemonHistory;
+};
+
+/** How to connect an Influx Daemon to the panel, for people who can change the service. */
+export type DaemonConnection = {
+    token: string;
+    /** Where the panel expects to reach the daemon. */
+    url: string;
 };
 
 export type DaemonDisk = {
@@ -236,6 +275,8 @@ export type DaemonContainer = {
 
 /** One sample of a daemon's host, as pulled from it and broadcast to live viewers. */
 export type DaemonSample = {
+    /** Numbers the samples of one daemon process, from 1. */
+    seq: number;
     collected_at: string;
     uptime_seconds: number;
     cpu: {

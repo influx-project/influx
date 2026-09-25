@@ -22,7 +22,7 @@ class ServiceReportTest extends TestCase
         $this->assertSame('pending', $report->status(Service::factory()->create())['state']);
         $this->assertSame('paused', $report->status(Service::factory()->disabled()->create())['state']);
         $this->assertSame('paused', $report->status(Service::factory()->create(['collect_metrics' => false]))['state']);
-        $this->assertSame('unsupported', $report->status(Service::factory()->create(['type' => ServiceType::InfluxDaemon]))['state']);
+        $this->assertSame('pending', $report->status(Service::factory()->create(['type' => ServiceType::InfluxDaemon]))['state']);
 
         $up = Service::factory()->create();
         Metric::factory()->for($up)->create();

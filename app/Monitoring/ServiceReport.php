@@ -39,7 +39,6 @@ class ServiceReport
         $incident = $service->ongoingIncident;
 
         $state = match (true) {
-            ! $service->type->collectsMetrics() => 'unsupported',
             ! $service->enabled || ! $service->collect_metrics => 'paused',
             $incident !== null => 'down',
             $latest === null => 'pending',

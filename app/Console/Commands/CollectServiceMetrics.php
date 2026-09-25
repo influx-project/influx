@@ -2,7 +2,6 @@
 
 namespace App\Console\Commands;
 
-use App\Enums\ServiceType;
 use App\Jobs\CheckService;
 use App\Models\Service;
 use Illuminate\Console\Attributes\Description;
@@ -23,7 +22,6 @@ class CollectServiceMetrics extends Command
         Service::query()
             ->where('enabled', true)
             ->where('collect_metrics', true)
-            ->whereIn('type', ServiceType::collectable())
             ->unless($this->option('force'), fn ($query) => $query->where(
                 fn ($query) => $query->whereNull('next_check_at')->orWhere('next_check_at', '<=', now()),
             ))

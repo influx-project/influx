@@ -1,10 +1,4 @@
-import {
-    CircleCheck,
-    CircleDashed,
-    CircleOff,
-    CirclePause,
-    CircleX,
-} from 'lucide-react';
+import { CircleCheck, CircleDashed, CirclePause, CircleX } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
@@ -32,11 +26,6 @@ export const serviceStates: Record<
     paused: {
         label: 'Paused',
         icon: CirclePause,
-        className: 'text-muted-foreground',
-    },
-    unsupported: {
-        label: 'Not collected',
-        icon: CircleOff,
         className: 'text-muted-foreground',
     },
 };

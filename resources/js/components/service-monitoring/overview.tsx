@@ -60,11 +60,7 @@ export function ServiceOverview({
         <div className="flex flex-col gap-4">
             <CollectionNotice service={service} status={status} />
 
-            <LivePanel
-                service={service}
-                status={status}
-                settingsHref={settingsHref}
-            />
+            <LivePanel service={service} settingsHref={settingsHref} />
 
             <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
                 <h2 className="text-base font-semibold tracking-tight">

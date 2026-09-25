@@ -111,6 +111,7 @@ class ServiceController extends Controller
     {
         return Inertia::render('admin/services/edit', [
             ...$this->serviceTabProps($service),
+            ...$this->daemonConnectionProps($service),
             'options' => $this->serviceOptions(),
             'owners' => $this->owners(),
         ]);

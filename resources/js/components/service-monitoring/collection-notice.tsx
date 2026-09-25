@@ -1,4 +1,4 @@
-import { CircleDashed, CircleOff, CirclePause } from 'lucide-react';
+import { CircleDashed, CirclePause } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import type { Service, ServiceStatus } from '@/types';
 
@@ -13,20 +13,6 @@ export function CollectionNotice({
     status: ServiceStatus;
 }) {
     switch (status.state) {
-        case 'unsupported':
-            return (
-                <Alert>
-                    <CircleOff />
-                    <AlertTitle>
-                        Background collection isn't available for{' '}
-                        {service.type_label} services yet
-                    </AlertTitle>
-                    <AlertDescription>
-                        Metrics for this service will be reported by the Influx
-                        Daemon itself once that's supported.
-                    </AlertDescription>
-                </Alert>
-            );
         case 'paused':
             return (
                 <Alert>

@@ -89,7 +89,7 @@ class ServicePagesTest extends TestCase
             ->assertInertia(fn (Assert $page) => $page
                 ->component('services/daemon')
                 ->where('service.id', $service->id)
-                ->where('status.state', 'unsupported')
+                ->where('status.state', 'pending')
                 ->where('range', '7d')
                 ->has('ranges', 3)
                 ->where('daemon.agent', null)

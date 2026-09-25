@@ -2,7 +2,6 @@
 
 namespace App\Console\Commands;
 
-use App\Enums\ServiceType;
 use App\Jobs\StreamLiveCheck;
 use App\Models\Service;
 use App\Monitoring\LiveViewers;
@@ -35,7 +34,6 @@ class StreamLiveChecks extends Command
             ->whereKey($ids)
             ->where('enabled', true)
             ->where('stream_metrics', true)
-            ->whereIn('type', ServiceType::collectable())
             ->each(function (Service $service) use (&$restarted): void {
                 if (! Cache::has(StreamLiveCheck::lastCheckKey($service->id))) {
                     StreamLiveCheck::dispatch($service);

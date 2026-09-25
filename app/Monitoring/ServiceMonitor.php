@@ -6,6 +6,7 @@ use App\Enums\ServiceType;
 use App\Models\Metric;
 use App\Models\Service;
 use App\Monitoring\Checkers\Checker;
+use App\Monitoring\Checkers\DaemonChecker;
 use App\Monitoring\Checkers\DnsChecker;
 use App\Monitoring\Checkers\HttpChecker;
 use App\Monitoring\Checkers\PingChecker;
@@ -25,36 +26,22 @@ class ServiceMonitor
 
     /**
      * Check the service and record the result.
-     *
-     * Returns null for types the background collector does not check.
      */
-    public function check(Service $service): ?Metric
+    public function check(Service $service): Metric
     {
         $checkedAt = now();
         $result = $this->probe($service);
-
-        if ($result === null) {
-            return null;
-        }
 
         return DB::transaction(fn (): Metric => $this->record($service, $result, $checkedAt));
     }
 
     /**
      * Check the service without recording anything, as live updates do.
-     *
-     * Returns null for types the background collector does not check.
      */
-    public function probe(Service $service): ?CheckResult
+    public function probe(Service $service): CheckResult
     {
-        $checker = $this->checkerFor($service->type);
-
-        if ($checker === null) {
-            return null;
-        }
-
         try {
-            return $checker->check($service);
+            return $this->checkerFor($service->type)->check($service);
         } catch (Throwable $e) {
             report($e);
 
@@ -63,9 +50,9 @@ class ServiceMonitor
     }
 
     /**
-     * Get the checker for the given type, if it is checked in the background.
+     * Get the checker for the given type.
      */
-    public function checkerFor(ServiceType $type): ?Checker
+    public function checkerFor(ServiceType $type): Checker
     {
         $checker = match ($type) {
             ServiceType::Http => HttpChecker::class,
@@ -74,11 +61,10 @@ class ServiceMonitor
             ServiceType::Ping => PingChecker::class,
             ServiceType::Dns => DnsChecker::class,
             ServiceType::Smtp => SmtpChecker::class,
-            // Collected by the Influx Daemon itself, once that exists.
-            ServiceType::InfluxDaemon => null,
+            ServiceType::InfluxDaemon => DaemonChecker::class,
         };
 
-        return $checker === null ? null : $this->container->make($checker);
+        return $this->container->make($checker);
     }
 
     /**

@@ -74,6 +74,18 @@ class ServiceFactory extends Factory
     }
 
     /**
+     * Indicate that the service is a host running Influx Daemon on its default port.
+     */
+    public function influxDaemon(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'type' => ServiceType::InfluxDaemon,
+            'port' => ServiceType::INFLUX_DAEMON_PORT,
+            'use_ssl' => false,
+        ]);
+    }
+
+    /**
      * Indicate the importance the service is monitored at.
      */
     public function importance(ServiceImportance $importance): static
