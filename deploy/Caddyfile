@@ -1,0 +1,38 @@
+# Web server for the app, run by FrankenPHP.
+#
+# SERVER_NAME decides whether HTTPS is used:
+#   SERVER_NAME=monitor.example.com  -> automatic HTTPS with a Let's Encrypt certificate,
+#                                       and HTTP redirected to HTTPS
+#   SERVER_NAME=:80                  -> plain HTTP only
+
+{
+	# Extra global options, e.g. "email you@example.com" for Let's Encrypt notices.
+	{$CADDY_GLOBAL_OPTIONS}
+
+	frankenphp
+
+	# Honour X-Forwarded-* from a proxy on a private network in front of this server.
+	servers {
+		trusted_proxies static private_ranges
+	}
+}
+
+{$SERVER_NAME::80} {
+	root * /app/public
+	encode zstd br gzip
+
+	# Extra site directives, e.g. "tls /certs/fullchain.pem /certs/privkey.pem" to use your
+	# own certificate instead of Let's Encrypt.
+	{$CADDY_SERVER_EXTRA_DIRECTIVES}
+
+	# Long-lived caching for fingerprinted build assets.
+	@build path /build/*
+	header @build Cache-Control "public, max-age=31536000, immutable"
+
+	# Live updates: WebSocket connections are passed to the Reverb container. Reverb's
+	# HTTP API (/apps/*) is deliberately not exposed; the app reaches it internally.
+	@reverb path /app/*
+	reverse_proxy @reverb reverb:8080
+
+	php_server
+}

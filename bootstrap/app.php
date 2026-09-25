@@ -29,6 +29,10 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->alias(['admin' => EnsureUserIsAdmin::class]);
 
+        // Behind a load balancer or reverse proxy that terminates TLS, list its addresses (or "*")
+        // so Laravel trusts its X-Forwarded-* headers. Unset, no proxies are trusted.
+        $middleware->trustProxies(at: env('TRUSTED_PROXIES'));
+
         $middleware->web(append: [
             HandleAppearance::class,
             HandleInertiaRequests::class,

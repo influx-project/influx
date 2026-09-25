@@ -1,0 +1,27 @@
+# Keep the build context small, and keep local secrets and build output out of the image.
+.git
+.github
+.ai
+.env
+.env.*
+!.env.example
+node_modules
+vendor
+public/build
+public/hot
+bootstrap/ssr
+bootstrap/cache/*.php
+storage/logs/*
+storage/framework/cache/data/*
+storage/framework/sessions/*
+storage/framework/views/*
+storage/pail
+database/*.sqlite
+resources/js/actions
+resources/js/routes
+resources/js/wayfinder
+tests
+.phpunit.cache
+.phpunit.result.cache
+deploy/.env
+*.log

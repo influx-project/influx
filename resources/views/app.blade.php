@@ -3,6 +3,8 @@
     <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
+        {{-- The public Reverb key, so the WebSocket client can be configured at runtime rather than at build time. --}}
+        <meta name="reverb-key" content="{{ config('broadcasting.connections.reverb.key') }}">
 
         {{-- Inline script to detect system dark mode preference and apply it immediately --}}
         <script>

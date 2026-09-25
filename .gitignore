@@ -42,3 +42,7 @@ yarn-error.log
 /boost.json
 /opencode.json
 /opencode.jsonc
+
+# Production deployment: local certificates and machine-specific overrides
+/deploy/certs
+/deploy/compose.override.yaml

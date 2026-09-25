@@ -1,0 +1,137 @@
+# Production deployment. See README.md in this directory for setup.
+#
+#   cd deploy
+#   cp .env.example .env    # then fill it in
+#   docker compose build
+#   docker compose up -d
+
+name: influx
+
+# Shared by every service that runs the application image.
+x-app: &app
+  image: ${APP_IMAGE:-influx-project}:${APP_TAG:-latest}
+  env_file: .env
+  environment:
+    # Fixed for this deployment; everything else comes from .env.
+    APP_ENV: production
+    LOG_CHANNEL: stderr
+    DB_CONNECTION: pgsql
+    DB_HOST: postgres
+    DB_PORT: 5432
+    REDIS_HOST: redis
+    REDIS_PORT: 6379
+    CACHE_STORE: redis
+    SESSION_DRIVER: redis
+    QUEUE_CONNECTION: redis
+    # Longer than the slowest job (a check with the maximum 120 s timeout plus margin),
+    # so a running job is never handed to a second worker.
+    REDIS_QUEUE_RETRY_AFTER: 180
+    BROADCAST_CONNECTION: reverb
+    # The app talks to Reverb directly on the internal network. Browsers reach it
+    # through the web server at /app, on the site's own address.
+    REVERB_HOST: reverb
+    REVERB_PORT: 8080
+    REVERB_SCHEME: http
+    REVERB_SERVER_HOST: 0.0.0.0
+    REVERB_SERVER_PORT: 8080
+    INERTIA_SSR_ENABLED: "false"
+  volumes:
+    - storage:/app/storage/app
+  restart: unless-stopped
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  # Runs the database migrations, then exits. Everything else waits for it.
+  migrate:
+    <<: *app
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    command: ["php", "artisan", "migrate", "--force", "--no-interaction"]
+    restart: "no"
+
+  # The website, on ports 80 and 443. Also proxies live-update WebSockets to Reverb.
+  web:
+    <<: *app
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+      - "${HTTPS_PORT:-443}:443/udp"
+    volumes:
+      - storage:/app/storage/app
+      - caddy_data:/data/caddy
+      - caddy_config:/config/caddy
+    depends_on: &after-migrate
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # WebSocket server for live updates.
+  reverb:
+    <<: *app
+    command: ["php", "artisan", "reverb:start", "--no-interaction"]
+    depends_on: *after-migrate
+
+  # Background checks and other queued work. Scale with `--scale queue=3`.
+  queue:
+    <<: *app
+    command:
+      ["php", "artisan", "queue:work", "--queue=default", "--tries=1", "--max-time=3600", "--no-interaction"]
+    stop_grace_period: 2m
+    depends_on: *after-migrate
+
+  # Live checks for people watching a service, on their own worker so they never
+  # wait behind slow background checks.
+  queue-live:
+    <<: *app
+    command:
+      ["php", "artisan", "queue:work", "--queue=live", "--sleep=1", "--tries=1", "--max-time=3600", "--no-interaction"]
+    stop_grace_period: 1m
+    depends_on: *after-migrate
+
+  # Queues background checks every 10 s, live checks every 2 s, and prunes old metrics daily.
+  scheduler:
+    <<: *app
+    command: ["php", "artisan", "schedule:work", "--no-interaction"]
+    depends_on: *after-migrate
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${DB_DATABASE:-influx}
+      POSTGRES_USER: ${DB_USERNAME:-influx}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in deploy/.env}
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  storage:
+  postgres:
+  redis:
+  caddy_data:
+  caddy_config:
