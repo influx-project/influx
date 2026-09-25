@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Concerns\PresentsServiceMonitoring;
 use App\Concerns\QueriesServices;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreServiceRequest;
@@ -20,7 +21,7 @@ use Inertia\Response;
  */
 class ServiceController extends Controller
 {
-    use QueriesServices;
+    use PresentsServiceMonitoring, QueriesServices;
 
     /**
      * Show every service.
@@ -61,13 +62,35 @@ class ServiceController extends Controller
     }
 
     /**
-     * Show the given service.
+     * Show the given service's overview: its current status, charts and recent checks.
      */
-    public function show(Service $service): Response
+    public function show(Request $request, Service $service): Response
     {
-        return Inertia::render('admin/services/show', [
-            'service' => ServiceResource::make($service->load('owner'))->resolve(),
-        ]);
+        return Inertia::render('admin/services/show', $this->overviewProps($request, $service));
+    }
+
+    /**
+     * Show the given service's uptime history and incidents.
+     */
+    public function downtime(Service $service): Response
+    {
+        return Inertia::render('admin/services/downtime', $this->downtimeProps($service));
+    }
+
+    /**
+     * Show the alerts derived from the given service's checks.
+     */
+    public function alerts(Service $service): Response
+    {
+        return Inertia::render('admin/services/alerts', $this->alertsProps($service));
+    }
+
+    /**
+     * Show the given service's configuration and ownership.
+     */
+    public function information(Service $service): Response
+    {
+        return Inertia::render('admin/services/information', $this->serviceTabProps($service));
     }
 
     /**
@@ -76,7 +99,7 @@ class ServiceController extends Controller
     public function edit(Service $service): Response
     {
         return Inertia::render('admin/services/edit', [
-            'service' => ServiceResource::make($service)->resolve(),
+            ...$this->serviceTabProps($service),
             'options' => $this->serviceOptions(),
             'owners' => $this->owners(),
         ]);

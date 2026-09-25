@@ -1,25 +1,48 @@
-import { Head, setLayoutProps } from '@inertiajs/react';
-import ServiceController from '@/actions/App/Http/Controllers/ServiceController';
-import { ServiceDetails } from '@/components/service-details';
-import { edit, index, show } from '@/routes/services';
-import type { Service } from '@/types';
+import { Head } from '@inertiajs/react';
+import { ServiceOverview } from '@/components/service-monitoring/overview';
+import { RangePicker } from '@/components/service-monitoring/range-picker';
+import ServiceLayout from '@/layouts/service-layout';
+import { userServiceRoutes } from '@/lib/service-routes';
+import type {
+    Service,
+    ServiceOverview as Overview,
+    ServiceStatus,
+    TimeRangeOption,
+    TimeRangeValue,
+} from '@/types';
 
-export default function ShowService({ service }: { service: Service }) {
-    setLayoutProps({
-        breadcrumbs: [
-            { title: 'Services', href: index() },
-            { title: service.name, href: show(service.id) },
-        ],
-    });
-
+export default function ShowService({
+    service,
+    status,
+    overview,
+    range,
+    ranges,
+}: {
+    service: Service;
+    status: ServiceStatus;
+    overview: Overview;
+    range: TimeRangeValue;
+    ranges: TimeRangeOption[];
+}) {
     return (
         <>
             <Head title={service.name} />
-            <ServiceDetails
+            <ServiceLayout
                 service={service}
-                editHref={edit(service.id)}
-                destroyForm={ServiceController.destroy.form(service.id)}
-            />
+                status={status}
+                routes={userServiceRoutes}
+                tab="show"
+                actions={<RangePicker value={range} options={ranges} />}
+            >
+                <ServiceOverview
+                    service={service}
+                    status={status}
+                    overview={overview}
+                    range={range}
+                    ranges={ranges}
+                    settingsHref={userServiceRoutes.edit(service.id)}
+                />
+            </ServiceLayout>
         </>
     );
 }

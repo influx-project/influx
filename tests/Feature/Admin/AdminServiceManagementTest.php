@@ -54,6 +54,33 @@ class AdminServiceManagementTest extends TestCase
         $this->assertSame($owner->id, Service::sole()->user_id);
     }
 
+    public function test_admins_can_create_and_update_an_influx_daemon_service()
+    {
+        $admin = User::factory()->admin()->create();
+
+        $this->actingAs($admin)
+            ->get(route('admin.services.create'))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('options.types', fn ($types) => collect($types)->contains('value', 'influx_daemon')));
+
+        $this->actingAs($admin)
+            ->post(route('admin.services.store'), [
+                'name' => 'Edge daemon',
+                'type' => 'influx_daemon',
+                'host' => 'edge.internal',
+                'port' => 9000,
+            ])
+            ->assertRedirect(route('admin.services.show', Service::sole()));
+
+        $service = Service::sole();
+        $this->assertSame('influx_daemon', $service->type->value);
+
+        $this->actingAs($admin)
+            ->put(route('admin.services.update', $service), ['type' => 'tcp'])
+            ->assertRedirect(route('admin.services.show', $service));
+        $this->assertSame('tcp', $service->fresh()->type->value);
+    }
+
     public function test_admins_can_reassign_and_unassign_a_service()
     {
         $admin = User::factory()->admin()->create();

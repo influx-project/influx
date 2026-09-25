@@ -1,11 +1,7 @@
 import { Form, Link } from '@inertiajs/react';
-import { Pencil, Trash2 } from 'lucide-react';
+import { Trash2 } from 'lucide-react';
 import type { ReactNode } from 'react';
-import {
-    ImportanceBadge,
-    MonitoringBadge,
-    ServiceEndpoint,
-} from '@/components/service-badges';
+import { ImportanceBadge, MonitoringBadge } from '@/components/service-badges';
 import { Button } from '@/components/ui/button';
 import {
     Card,
@@ -24,40 +20,18 @@ import {
     DialogTrigger,
 } from '@/components/ui/dialog';
 import { Spinner } from '@/components/ui/spinner';
+import { formatDateTime, formatSeconds } from '@/lib/format';
 import type { Service } from '@/types';
 import type { RouteDefinition, RouteFormDefinition } from '@/wayfinder';
 
-function formatDateTime(value: string): string {
-    return new Date(value).toLocaleString(undefined, {
-        dateStyle: 'medium',
-        timeStyle: 'short',
-    });
-}
-
-function formatSeconds(seconds: number): string {
-    if (seconds % 3600 === 0) {
-        return `${seconds / 3600} h`;
-    }
-
-    if (seconds % 60 === 0) {
-        return `${seconds / 60} min`;
-    }
-
-    return `${seconds} s`;
-}
-
 /**
- * A service's full details, with edit and delete actions.
+ * A service's configuration, monitoring settings and ownership.
  */
-export function ServiceDetails({
+export function ServiceInformation({
     service,
-    editHref,
-    destroyForm,
     ownerHref,
 }: {
     service: Service;
-    editHref: RouteDefinition<'get'>;
-    destroyForm: RouteFormDefinition<'post'>;
     /** When given, the owner's name links to their profile. */
     ownerHref?: (id: number) => RouteDefinition<'get'>;
 }) {
@@ -144,73 +118,19 @@ export function ServiceDetails({
     ];
 
     return (
-        <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-4 p-4">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                <div className="min-w-0 space-y-1">
-                    <h1 className="truncate text-xl font-semibold tracking-tight">
-                        {service.name}
-                    </h1>
-                    <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                        <ServiceEndpoint service={service} />
-                        {service.location && <span>· {service.location}</span>}
-                    </div>
-                    {service.description && (
-                        <p className="pt-1 text-sm whitespace-pre-line">
+        <div className="flex flex-col gap-4">
+            {service.description && (
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Description</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <p className="text-sm whitespace-pre-line">
                             {service.description}
                         </p>
-                    )}
-                </div>
-
-                <div className="flex shrink-0 gap-2">
-                    <Button variant="outline" asChild>
-                        <Link href={editHref}>
-                            <Pencil />
-                            Edit
-                        </Link>
-                    </Button>
-
-                    <Dialog>
-                        <DialogTrigger asChild>
-                            <Button
-                                variant="destructive"
-                                data-test="delete-service-button"
-                            >
-                                <Trash2 />
-                                Delete
-                            </Button>
-                        </DialogTrigger>
-                        <DialogContent>
-                            <DialogTitle>Delete {service.name}?</DialogTitle>
-                            <DialogDescription>
-                                Monitoring of {service.host} stops immediately
-                                and the service's configuration is permanently
-                                removed. This cannot be undone.
-                            </DialogDescription>
-
-                            <Form {...destroyForm}>
-                                {({ processing }) => (
-                                    <DialogFooter className="gap-2">
-                                        <DialogClose asChild>
-                                            <Button variant="secondary">
-                                                Cancel
-                                            </Button>
-                                        </DialogClose>
-                                        <Button
-                                            type="submit"
-                                            variant="destructive"
-                                            disabled={processing}
-                                            data-test="confirm-delete-service-button"
-                                        >
-                                            {processing && <Spinner />}
-                                            Delete service
-                                        </Button>
-                                    </DialogFooter>
-                                )}
-                            </Form>
-                        </DialogContent>
-                    </Dialog>
-                </div>
-            </div>
+                    </CardContent>
+                </Card>
+            )}
 
             {sections.map((section) => (
                 <Card key={section.title}>
@@ -238,5 +158,71 @@ export function ServiceDetails({
                 </Card>
             ))}
         </div>
+    );
+}
+
+/**
+ * A danger-zone card for permanently deleting a service.
+ */
+export function DeleteServiceCard({
+    service,
+    destroyForm,
+}: {
+    service: Service;
+    destroyForm: RouteFormDefinition<'post'>;
+}) {
+    return (
+        <Card className="border-destructive/40">
+            <CardHeader>
+                <CardTitle>Delete service</CardTitle>
+                <CardDescription>
+                    Stops monitoring {service.host} and permanently removes the
+                    service with all of its metrics and incidents.
+                </CardDescription>
+            </CardHeader>
+            <CardContent>
+                <Dialog>
+                    <DialogTrigger asChild>
+                        <Button
+                            variant="destructive"
+                            data-test="delete-service-button"
+                        >
+                            <Trash2 />
+                            Delete service
+                        </Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                        <DialogTitle>Delete {service.name}?</DialogTitle>
+                        <DialogDescription>
+                            Monitoring of {service.host} stops immediately and
+                            the service's configuration, metrics and incident
+                            history are permanently removed. This cannot be
+                            undone.
+                        </DialogDescription>
+
+                        <Form {...destroyForm}>
+                            {({ processing }) => (
+                                <DialogFooter className="gap-2">
+                                    <DialogClose asChild>
+                                        <Button variant="secondary">
+                                            Cancel
+                                        </Button>
+                                    </DialogClose>
+                                    <Button
+                                        type="submit"
+                                        variant="destructive"
+                                        disabled={processing}
+                                        data-test="confirm-delete-service-button"
+                                    >
+                                        {processing && <Spinner />}
+                                        Delete service
+                                    </Button>
+                                </DialogFooter>
+                            )}
+                        </Form>
+                    </DialogContent>
+                </Dialog>
+            </CardContent>
+        </Card>
     );
 }

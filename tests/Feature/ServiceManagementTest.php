@@ -67,6 +67,35 @@ class ServiceManagementTest extends TestCase
         ]);
     }
 
+    public function test_users_can_create_and_update_an_influx_daemon_service()
+    {
+        $user = User::factory()->create();
+
+        $this->actingAs($user)
+            ->get(route('services.create'))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('options.types', fn ($types) => collect($types)->contains(
+                    fn ($type) => $type['value'] === 'influx_daemon' && $type['label'] === 'Influx Daemon',
+                )));
+
+        $this->actingAs($user)
+            ->post(route('services.store'), [
+                'name' => 'Edge daemon',
+                'type' => 'influx_daemon',
+                'host' => 'edge.internal',
+                'port' => 9000,
+            ])
+            ->assertRedirect(route('services.show', Service::sole()));
+
+        $service = Service::sole();
+        $this->assertSame('influx_daemon', $service->type->value);
+
+        $this->actingAs($user)
+            ->put(route('services.update', $service), ['port' => 9001])
+            ->assertRedirect(route('services.show', $service));
+        $this->assertSame(9001, $service->fresh()->port);
+    }
+
     public function test_owners_can_view_edit_and_update_their_service()
     {
         $user = User::factory()->create();

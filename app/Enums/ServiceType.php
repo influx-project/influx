@@ -11,6 +11,7 @@ enum ServiceType: string
     case Database = 'database';
     case Dns = 'dns';
     case Smtp = 'smtp';
+    case InfluxDaemon = 'influx_daemon';
 
     /**
      * Get the human readable label for the type.
@@ -25,6 +26,7 @@ enum ServiceType: string
             self::Database => 'Database',
             self::Dns => 'DNS',
             self::Smtp => 'SMTP',
+            self::InfluxDaemon => 'Influx Daemon',
         };
     }
 
@@ -37,13 +39,31 @@ enum ServiceType: string
     }
 
     /**
+     * Determine whether services of this type are checked by the background collector.
+     */
+    public function collectsMetrics(): bool
+    {
+        return $this !== self::InfluxDaemon;
+    }
+
+    /**
+     * Get every type the background collector can check.
+     *
+     * @return list<self>
+     */
+    public static function collectable(): array
+    {
+        return array_values(array_filter(self::cases(), fn (self $type): bool => $type->collectsMetrics()));
+    }
+
+    /**
      * Get the port conventionally used by this type, if any.
      */
     public function defaultPort(bool $useSsl = false): ?int
     {
         return match ($this) {
             self::Http => $useSsl ? 443 : 80,
-            self::Tcp, self::Ping => null,
+            self::Tcp, self::Ping, self::InfluxDaemon => null,
             self::Ssh => 22,
             self::Database => 3306,
             self::Dns => 53,

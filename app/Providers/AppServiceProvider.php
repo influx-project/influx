@@ -2,7 +2,9 @@
 
 namespace App\Providers;
 
+use App\Jobs\StreamLiveCheck;
 use Carbon\CarbonImmutable;
+use Illuminate\Foundation\DevCommands;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\ServiceProvider;
@@ -24,6 +26,22 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->configureDefaults();
+        $this->configureDevCommands();
+    }
+
+    /**
+     * Configure the processes `php artisan dev` runs alongside the defaults.
+     */
+    protected function configureDevCommands(): void
+    {
+        // Background collection and live updates are driven by the scheduler.
+        DevCommands::artisan('schedule:work', 'schedule');
+
+        DevCommands::artisan('queue:listen --tries=1 --timeout=0', 'queue');
+
+        // Live checks get a worker of their own, polling every second, so they are never
+        // stuck behind background checks that are waiting to time out.
+        DevCommands::artisan('queue:listen --queue='.StreamLiveCheck::QUEUE.' --tries=1 --timeout=0 --sleep=1', 'live');
     }
 
     /**

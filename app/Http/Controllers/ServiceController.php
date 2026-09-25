@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Concerns\PresentsServiceMonitoring;
 use App\Concerns\QueriesServices;
 use App\Http\Requests\StoreServiceRequest;
 use App\Http\Requests\UpdateServiceRequest;
@@ -18,7 +19,7 @@ use Inertia\Response;
  */
 class ServiceController extends Controller
 {
-    use QueriesServices;
+    use PresentsServiceMonitoring, QueriesServices;
 
     /**
      * Show the current user's services.
@@ -56,15 +57,43 @@ class ServiceController extends Controller
     }
 
     /**
-     * Show the given service.
+     * Show the given service's overview: its current status, charts and recent checks.
      */
-    public function show(Service $service): Response
+    public function show(Request $request, Service $service): Response
     {
         Gate::authorize('view', $service);
 
-        return Inertia::render('services/show', [
-            'service' => ServiceResource::make($service->load('owner'))->resolve(),
-        ]);
+        return Inertia::render('services/show', $this->overviewProps($request, $service));
+    }
+
+    /**
+     * Show the given service's uptime history and incidents.
+     */
+    public function downtime(Service $service): Response
+    {
+        Gate::authorize('view', $service);
+
+        return Inertia::render('services/downtime', $this->downtimeProps($service));
+    }
+
+    /**
+     * Show the alerts derived from the given service's checks.
+     */
+    public function alerts(Service $service): Response
+    {
+        Gate::authorize('view', $service);
+
+        return Inertia::render('services/alerts', $this->alertsProps($service));
+    }
+
+    /**
+     * Show the given service's configuration and ownership.
+     */
+    public function information(Service $service): Response
+    {
+        Gate::authorize('view', $service);
+
+        return Inertia::render('services/information', $this->serviceTabProps($service));
     }
 
     /**
@@ -75,7 +104,7 @@ class ServiceController extends Controller
         Gate::authorize('update', $service);
 
         return Inertia::render('services/edit', [
-            'service' => ServiceResource::make($service)->resolve(),
+            ...$this->serviceTabProps($service),
             'options' => $this->serviceOptions(),
         ]);
     }

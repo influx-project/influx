@@ -1,29 +1,48 @@
-import { Head, setLayoutProps } from '@inertiajs/react';
-import ServiceController from '@/actions/App/Http/Controllers/Admin/ServiceController';
-import { ServiceDetails } from '@/components/service-details';
-import { overview } from '@/routes/admin';
-import { edit, index, show } from '@/routes/admin/services';
-import { show as showUser } from '@/routes/admin/users';
-import type { Service } from '@/types';
+import { Head } from '@inertiajs/react';
+import { ServiceOverview } from '@/components/service-monitoring/overview';
+import { RangePicker } from '@/components/service-monitoring/range-picker';
+import ServiceLayout from '@/layouts/service-layout';
+import { adminServiceRoutes } from '@/lib/service-routes';
+import type {
+    Service,
+    ServiceOverview as Overview,
+    ServiceStatus,
+    TimeRangeOption,
+    TimeRangeValue,
+} from '@/types';
 
-export default function AdminShowService({ service }: { service: Service }) {
-    setLayoutProps({
-        breadcrumbs: [
-            { title: 'Admin', href: overview() },
-            { title: 'Services', href: index() },
-            { title: service.name, href: show(service.id) },
-        ],
-    });
-
+export default function AdminShowService({
+    service,
+    status,
+    overview,
+    range,
+    ranges,
+}: {
+    service: Service;
+    status: ServiceStatus;
+    overview: Overview;
+    range: TimeRangeValue;
+    ranges: TimeRangeOption[];
+}) {
     return (
         <>
             <Head title={service.name} />
-            <ServiceDetails
+            <ServiceLayout
                 service={service}
-                editHref={edit(service.id)}
-                destroyForm={ServiceController.destroy.form(service.id)}
-                ownerHref={showUser}
-            />
+                status={status}
+                routes={adminServiceRoutes}
+                tab="show"
+                actions={<RangePicker value={range} options={ranges} />}
+            >
+                <ServiceOverview
+                    service={service}
+                    status={status}
+                    overview={overview}
+                    range={range}
+                    ranges={ranges}
+                    settingsHref={adminServiceRoutes.edit(service.id)}
+                />
+            </ServiceLayout>
         </>
     );
 }
