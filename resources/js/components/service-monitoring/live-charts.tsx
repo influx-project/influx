@@ -8,12 +8,21 @@ import {
 import {
     useAnimationFrame,
     useElementWidth,
+    useTweenedNumber,
 } from '@/hooks/use-animation-frame';
 import { formatLatency } from '@/lib/format';
 import { LIVE_CACHE_MS } from '@/lib/live-check-cache';
 import { cn } from '@/lib/utils';
 import type { LiveCheck } from '@/types';
 import { ChartTooltipBox } from './chart-tooltip';
+
+/*
+ * Rendering notes: everything here is plain SVG, redrawn in real pixel coordinates.
+ * There are deliberately no CSS transforms, transitions, `will-change` or CSS masks,
+ * which would hand the drawing to the GPU compositor as a bitmap to stretch and shift,
+ * blurring it. Instead each frame sets an SVG `transform` attribute to a pixel-snapped
+ * offset, so the browser repaints the (small) chart sharply every time.
+ */
 
 /**
  * How far behind real time the live visuals run. Results arrive shortly after the time
@@ -29,15 +38,24 @@ export const SLOT_MS = 4000;
 const GAP_MS = 15_000;
 
 const CHART_HEIGHT = 112;
-
-/** Fades the edges, so results dissolve as they leave and ease in as they arrive. */
-const EDGE_MASK = {
-    maskImage:
-        'linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 12px), transparent)',
-};
 const CHART_PADDING = 8;
+const HEARTBEAT_HEIGHT = 20;
 
-/** Where time `t` sits on screen, given how far the track has scrolled. */
+/** Widths of the faded edges, where results dissolve as they leave and ease in as they arrive. */
+const FADE_LEFT_PX = 32;
+const FADE_RIGHT_PX = 12;
+
+/**
+ * Round a length to whole device pixels, so edges land on the pixel grid rather than
+ * being smeared across two pixels.
+ */
+function snap(px: number): number {
+    const ratio = window.devicePixelRatio || 1;
+
+    return Math.round(px * ratio) / ratio;
+}
+
+/** How far the track has scrolled: time `t` is drawn at `offset + (t - anchor) * pxPerMs`. */
 function trackOffset(width: number, anchor: number, now: number): number {
     return width - ((now - DISPLAY_DELAY_MS - anchor) * width) / LIVE_CACHE_MS;
 }
@@ -105,12 +123,13 @@ function monotonePath(points: [number, number][]): string {
 }
 
 /**
- * Split the successful checks into runs, breaking wherever they are far apart or a check failed.
+ * Split the successful checks into runs of pixel points, breaking wherever they are
+ * far apart or a check failed, and trace each run as a line and a filled area.
  */
 function segments(
     checks: LiveCheck[],
-    anchor: number,
-    pxPerMs: number,
+    x: (time: number) => number,
+    y: (latency: number) => number,
 ): { line: string; area: string }[] {
     const runs: [number, number][][] = [];
     let run: [number, number][] = [];
@@ -128,7 +147,7 @@ function segments(
         }
 
         if (check.latency_ms !== null) {
-            run.push([(time - anchor) * pxPerMs, check.latency_ms]);
+            run.push([x(time), y(check.latency_ms)]);
         }
 
         previousTime = time;
@@ -138,58 +157,105 @@ function segments(
         runs.push(run);
     }
 
+    const baseline = y(0);
+
     return runs.map((points) => {
         const line = monotonePath(points);
         const first = points[0][0];
         const last = points.at(-1)![0];
 
-        return { line, area: `${line}L${last},0L${first},0Z` };
+        return {
+            line,
+            area: `${line}L${last},${baseline}L${first},${baseline}Z`,
+        };
     });
+}
+
+/**
+ * An SVG mask fading the left and right edges, so content scrolling past dissolves.
+ */
+function EdgeFade({
+    id,
+    width,
+    height,
+}: {
+    id: string;
+    width: number;
+    height: number;
+}) {
+    const left = width > 0 ? Math.min(FADE_LEFT_PX / width, 0.5) : 0;
+    const right = width > 0 ? 1 - Math.min(FADE_RIGHT_PX / width, 0.5) : 1;
+
+    return (
+        <>
+            <linearGradient id={`${id}-fade`} x1="0" x2="1" y1="0" y2="0">
+                <stop offset={0} stopColor="#000" />
+                <stop offset={left} stopColor="#fff" />
+                <stop offset={right} stopColor="#fff" />
+                <stop offset={1} stopColor="#000" />
+            </linearGradient>
+            <mask id={id} maskUnits="userSpaceOnUse">
+                <rect width={width} height={height} fill={`url(#${id}-fade)`} />
+            </mask>
+        </>
+    );
 }
 
 /**
  * Response time of each live check, scrolling smoothly right to left over the cache window.
  *
- * Paths are rebuilt only when checks arrive; each frame just moves the track, and a new
- * scale eases in with a CSS transition while `non-scaling-stroke` keeps the line crisp.
+ * Paths are rebuilt when checks arrive, and for a moment while the scale eases to a new
+ * maximum; otherwise each frame only moves the track.
  */
 export function LiveLatencyChart({ checks }: { checks: LiveCheck[] }) {
     const container = useRef<HTMLDivElement>(null);
-    const track = useRef<HTMLDivElement>(null);
+    const track = useRef<SVGGElement>(null);
     const width = useElementWidth(container);
     const [anchor] = useState(() => Date.now());
     const [hovered, setHovered] = useState<{
         check: LiveCheck;
         left: number;
     } | null>(null);
-    const gradientId = useId();
+    const id = useId();
     const offset = useRef(0);
 
     const pxPerMs = width / LIVE_CACHE_MS;
     const plotHeight = CHART_HEIGHT - CHART_PADDING * 2;
     const successful = checks.filter(({ latency_ms }) => latency_ms !== null);
-    const yMax = niceMax(
+    const targetMax = niceMax(
         Math.max(10, ...successful.map(({ latency_ms }) => latency_ms!)) * 1.15,
     );
-    const yScale = plotHeight / yMax;
-    const paths = useMemo(
-        () => segments(checks, anchor, pxPerMs),
-        [checks, anchor, pxPerMs],
-    );
+    // Eased in JS, redrawing real coordinates, rather than stretching a bitmap with CSS.
+    const yMax = useTweenedNumber(targetMax, 600) ?? targetMax;
     const latest = successful.at(-1);
 
-    useAnimationFrame((now) => {
-        offset.current = trackOffset(width, anchor, now);
+    const paths = useMemo(
+        () =>
+            segments(
+                checks,
+                (time) => (time - anchor) * pxPerMs,
+                (latency) =>
+                    CHART_HEIGHT -
+                    CHART_PADDING -
+                    (latency / yMax) * plotHeight,
+            ),
+        [checks, anchor, pxPerMs, yMax, plotHeight],
+    );
 
-        // An HTML layer moved with translate3d is scrolled by the compositor, without repainting the SVG.
-        if (track.current) {
-            track.current.style.transform = `translate3d(${offset.current}px, 0, 0)`;
-        }
+    useAnimationFrame((now) => {
+        offset.current = snap(trackOffset(width, anchor, now));
+        track.current?.setAttribute(
+            'transform',
+            `translate(${offset.current} 0)`,
+        );
     });
 
     const pointAt = (check: LiveCheck) => ({
         x: (new Date(check.checked_at).getTime() - anchor) * pxPerMs,
-        y: CHART_HEIGHT - CHART_PADDING - (check.latency_ms ?? 0) * yScale,
+        y:
+            CHART_HEIGHT -
+            CHART_PADDING -
+            ((check.latency_ms ?? 0) / yMax) * plotHeight,
     });
 
     const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
@@ -197,30 +263,23 @@ export function LiveLatencyChart({ checks }: { checks: LiveCheck[] }) {
         const left = event.clientX - bounds.left;
         const time = anchor + (left - offset.current) / pxPerMs;
         let nearest: LiveCheck | null = null;
+        let nearestDistance = SLOT_MS;
 
         for (const check of successful) {
             const distance = Math.abs(
                 new Date(check.checked_at).getTime() - time,
             );
 
-            if (
-                distance < SLOT_MS &&
-                (!nearest ||
-                    distance <
-                        Math.abs(new Date(nearest.checked_at).getTime() - time))
-            ) {
+            if (distance < nearestDistance) {
                 nearest = check;
+                nearestDistance = distance;
             }
         }
 
         setHovered(nearest ? { check: nearest, left } : null);
     };
 
-    // Scale the plot so y is latency: flip it and stretch it, easing whenever the scale changes.
-    const scaleStyle = {
-        transform: `translateY(${CHART_HEIGHT - CHART_PADDING}px) scaleY(${-yScale})`,
-        transition: 'transform 600ms cubic-bezier(0.22, 1, 0.36, 1)',
-    };
+    const hoveredPoint = hovered ? pointAt(hovered.check) : null;
 
     return (
         <div className="flex gap-2">
@@ -228,22 +287,15 @@ export function LiveLatencyChart({ checks }: { checks: LiveCheck[] }) {
                 className="flex w-14 shrink-0 flex-col justify-between py-1 text-right text-xs text-muted-foreground tabular-nums"
                 aria-hidden
             >
-                <span key={yMax} className="animate-in duration-300 fade-in">
-                    {formatLatency(yMax)}
-                </span>
-                <span
-                    key={`mid-${yMax}`}
-                    className="animate-in duration-300 fade-in"
-                >
-                    {formatLatency(yMax / 2)}
-                </span>
+                <span>{formatLatency(targetMax)}</span>
+                <span>{formatLatency(targetMax / 2)}</span>
                 <span>0 ms</span>
             </div>
 
             <div
                 ref={container}
                 className="relative min-w-0 flex-1 overflow-hidden"
-                style={{ height: CHART_HEIGHT, ...EDGE_MASK }}
+                style={{ height: CHART_HEIGHT }}
                 onPointerMove={onPointerMove}
                 onPointerLeave={() => setHovered(null)}
                 role="img"
@@ -256,9 +308,35 @@ export function LiveLatencyChart({ checks }: { checks: LiveCheck[] }) {
                 <svg
                     width={width}
                     height={CHART_HEIGHT}
-                    className="absolute inset-0 block"
+                    className="block"
                     aria-hidden
                 >
+                    <defs>
+                        <linearGradient
+                            id={`${id}-area`}
+                            x1="0"
+                            y1="0"
+                            x2="0"
+                            y2="1"
+                        >
+                            <stop
+                                offset="0%"
+                                stopColor="var(--chart-1)"
+                                stopOpacity={0.22}
+                            />
+                            <stop
+                                offset="100%"
+                                stopColor="var(--chart-1)"
+                                stopOpacity={0}
+                            />
+                        </linearGradient>
+                        <EdgeFade
+                            id={`${id}-mask`}
+                            width={width}
+                            height={CHART_HEIGHT}
+                        />
+                    </defs>
+
                     {[0, 0.5, 1].map((fraction) => (
                         <line
                             key={fraction}
@@ -268,48 +346,15 @@ export function LiveLatencyChart({ checks }: { checks: LiveCheck[] }) {
                             y2={CHART_PADDING + plotHeight * fraction}
                             className="stroke-border"
                             strokeDasharray={fraction === 1 ? undefined : '3 3'}
+                            shapeRendering="crispEdges"
                         />
                     ))}
-                </svg>
 
-                <div
-                    ref={track}
-                    className="absolute inset-0 will-change-transform"
-                >
-                    <svg
-                        width={width}
-                        height={CHART_HEIGHT}
-                        className="block overflow-visible"
-                        aria-hidden
-                    >
-                        <defs>
-                            <linearGradient
-                                id={gradientId}
-                                x1="0"
-                                y1="1"
-                                x2="0"
-                                y2="0"
-                            >
-                                <stop
-                                    offset="0%"
-                                    stopColor="var(--chart-1)"
-                                    stopOpacity={0.22}
-                                />
-                                <stop
-                                    offset="100%"
-                                    stopColor="var(--chart-1)"
-                                    stopOpacity={0}
-                                />
-                            </linearGradient>
-                        </defs>
-
-                        <g style={scaleStyle}>
-                            {paths.map(({ area, line }) => (
-                                <g key={line}>
-                                    <path
-                                        d={area}
-                                        fill={`url(#${gradientId})`}
-                                    />
+                    <g mask={`url(#${id}-mask)`}>
+                        <g ref={track}>
+                            {paths.map(({ area, line }, index) => (
+                                <g key={index}>
+                                    <path d={area} fill={`url(#${id}-area)`} />
                                     <path
                                         d={line}
                                         fill="none"
@@ -317,43 +362,44 @@ export function LiveLatencyChart({ checks }: { checks: LiveCheck[] }) {
                                         strokeWidth={2}
                                         strokeLinecap="round"
                                         strokeLinejoin="round"
-                                        vectorEffect="non-scaling-stroke"
                                     />
                                 </g>
                             ))}
+
+                            {latest && <HeadMarker {...pointAt(latest)} />}
+
+                            {hoveredPoint && (
+                                <g className="pointer-events-none">
+                                    <line
+                                        x1={hoveredPoint.x}
+                                        x2={hoveredPoint.x}
+                                        y1={CHART_PADDING}
+                                        y2={CHART_HEIGHT - CHART_PADDING}
+                                        className="stroke-muted-foreground"
+                                        strokeDasharray="3 3"
+                                    />
+                                    <circle
+                                        cx={hoveredPoint.x}
+                                        cy={hoveredPoint.y}
+                                        r={4}
+                                        className="fill-background"
+                                        stroke="var(--chart-1)"
+                                        strokeWidth={2}
+                                    />
+                                </g>
+                            )}
                         </g>
-
-                        {latest && <HeadMarker {...pointAt(latest)} />}
-
-                        {hovered && (
-                            <g className="pointer-events-none">
-                                <line
-                                    x1={pointAt(hovered.check).x}
-                                    x2={pointAt(hovered.check).x}
-                                    y1={CHART_PADDING}
-                                    y2={CHART_HEIGHT - CHART_PADDING}
-                                    className="stroke-muted-foreground"
-                                    strokeDasharray="3 3"
-                                />
-                                <circle
-                                    cx={pointAt(hovered.check).x}
-                                    cy={pointAt(hovered.check).y}
-                                    r={4}
-                                    className="fill-background stroke-(--chart-1)"
-                                    strokeWidth={2}
-                                />
-                            </g>
-                        )}
-                    </svg>
-                </div>
+                    </g>
+                </svg>
 
                 {hovered && (
                     <div
                         className="pointer-events-none absolute top-0 z-10"
-                        style={{
-                            left: hovered.left,
-                            transform: `translateX(${hovered.left > width / 2 ? 'calc(-100% - 12px)' : '12px'})`,
-                        }}
+                        style={
+                            hovered.left > width / 2
+                                ? { right: width - hovered.left + 12 }
+                                : { left: hovered.left + 12 }
+                        }
                     >
                         <ChartTooltipBox
                             title={new Date(
@@ -385,25 +431,26 @@ export function LiveLatencyChart({ checks }: { checks: LiveCheck[] }) {
 }
 
 /**
- * A pulsing dot on the latest result, gliding to each new one.
+ * A softly pulsing dot on the latest result. The pulse animates opacity only, since
+ * animating a scale would hand the dot to the compositor and blur it.
  */
 function HeadMarker({ x, y }: { x: number; y: number }) {
     return (
-        <g
-            className="pointer-events-none"
-            style={{
-                transform: `translate(${x}px, ${y}px)`,
-                transition: 'transform 600ms cubic-bezier(0.22, 1, 0.36, 1)',
-            }}
-        >
+        <g className="pointer-events-none">
             <circle
+                cx={x}
+                cy={y}
                 r={7}
-                className="fill-(--chart-1) opacity-25 motion-safe:animate-ping"
-                style={{ transformBox: 'fill-box', transformOrigin: 'center' }}
+                fill="var(--chart-1)"
+                fillOpacity={0.25}
+                className="motion-safe:animate-pulse"
             />
             <circle
+                cx={x}
+                cy={y}
                 r={3.5}
-                className="fill-(--chart-1) stroke-background"
+                fill="var(--chart-1)"
+                className="stroke-background"
                 strokeWidth={1.5}
             />
         </g>
@@ -411,86 +458,128 @@ function HeadMarker({ x, y }: { x: number; y: number }) {
 }
 
 /**
- * One tick per four seconds over the cache window, green when up and red when down,
- * scrolling smoothly right to left over a track of empty slots.
+ * One slot per four seconds over the cache window, green when up, red when down and
+ * grey when there was no result, scrolling smoothly right to left.
  */
 export function LiveHeartbeat({ checks }: { checks: LiveCheck[] }) {
     const container = useRef<HTMLDivElement>(null);
-    const track = useRef<HTMLDivElement>(null);
+    const track = useRef<SVGGElement>(null);
     const width = useElementWidth(container);
     const [anchor] = useState(() => Date.now());
+    const id = useId();
+    // The first slot in view; changes once every four seconds as a slot scrolls off.
+    const [firstSlot, setFirstSlot] = useState(() =>
+        slotStart(anchor - DISPLAY_DELAY_MS - LIVE_CACHE_MS),
+    );
 
     const pxPerMs = width / LIVE_CACHE_MS;
-    const slotPx = SLOT_MS * pxPerMs;
-
-    // One tick per slot, aligned to the clock so ticks and empty slots line up.
-    const ticks = new Map<number, LiveCheck>();
-
-    for (const check of checks) {
-        const time = new Date(check.checked_at).getTime();
-        ticks.set(Math.floor(time / SLOT_MS) * SLOT_MS, check);
-    }
 
     useAnimationFrame((now) => {
-        const offset = trackOffset(width, anchor, now);
+        track.current?.setAttribute(
+            'transform',
+            `translate(${snap(trackOffset(width, anchor, now))} 0)`,
+        );
 
-        if (track.current) {
-            track.current.style.transform = `translate3d(${offset}px, 0, 0)`;
-        }
+        const first = slotStart(now - DISPLAY_DELAY_MS - LIVE_CACHE_MS);
 
-        // Scroll the empty slots with the ticks: slot boundaries fall on multiples of SLOT_MS.
-        if (container.current && slotPx > 0) {
-            const boundary = offset - anchor * pxPerMs;
-            container.current.style.backgroundPositionX = `${((boundary % slotPx) + slotPx) % slotPx}px`;
+        if (first !== firstSlot) {
+            setFirstSlot(first);
         }
     });
+
+    const bySlot = new Map<number, LiveCheck>();
+
+    for (const check of checks) {
+        bySlot.set(slotStart(new Date(check.checked_at).getTime()), check);
+    }
+
+    // Every slot in view plus one either side, with edges on whole device pixels so
+    // they stay sharp, and a one-device-pixel gap between them.
+    const gap = width > 0 ? snap(1) : 1;
+    const slots = Array.from(
+        { length: LIVE_CACHE_MS / SLOT_MS + 2 },
+        (_, index) => {
+            const start = firstSlot + index * SLOT_MS;
+            const left = snap((start - anchor) * pxPerMs);
+            const right = snap((start + SLOT_MS - anchor) * pxPerMs);
+
+            return {
+                start,
+                left,
+                width: Math.max(right - left - gap, gap),
+                check: bySlot.get(start),
+            };
+        },
+    );
 
     return (
         <div className="space-y-1.5">
             <div
                 ref={container}
-                className="relative h-5 overflow-hidden"
-                style={{
-                    ...EDGE_MASK,
-                    backgroundImage:
-                        'linear-gradient(to right, var(--muted) calc(100% - 1px), transparent calc(100% - 1px))',
-                    backgroundSize: `${slotPx}px 100%`,
-                }}
-                role="list"
-                aria-label={`${checks.length} live checks in the last 5 minutes`}
+                className="overflow-hidden"
+                style={{ height: HEARTBEAT_HEIGHT }}
             >
-                <div
-                    ref={track}
-                    className="absolute inset-y-0 left-0 will-change-transform"
+                <svg
+                    width={width}
+                    height={HEARTBEAT_HEIGHT}
+                    className="block"
+                    role="img"
+                    aria-label={`${checks.length} live checks in the last 5 minutes, ${checks.filter(({ successful }) => !successful).length} failed`}
                 >
-                    {[...ticks].map(([slot, check]) => (
-                        <Tooltip key={slot}>
-                            <TooltipTrigger asChild>
-                                <span
-                                    role="listitem"
-                                    className={cn(
-                                        'absolute inset-y-0 animate-in rounded-[1px] duration-500 fade-in',
-                                        check.successful
-                                            ? 'bg-emerald-500'
-                                            : 'bg-red-500',
-                                    )}
-                                    style={{
-                                        left: (slot - anchor) * pxPerMs,
-                                        width: Math.max(slotPx - 1, 1),
-                                    }}
-                                    aria-label={`${new Date(check.checked_at).toLocaleTimeString()}: ${check.successful ? 'up' : 'down'}`}
-                                />
-                            </TooltipTrigger>
-                            <TooltipContent>
-                                {new Date(
-                                    check.checked_at,
-                                ).toLocaleTimeString()}{' '}
-                                · {check.successful ? 'Up' : 'Down'} ·{' '}
-                                {formatLatency(check.latency_ms)}
-                            </TooltipContent>
-                        </Tooltip>
-                    ))}
-                </div>
+                    <defs>
+                        <EdgeFade
+                            id={`${id}-mask`}
+                            width={width}
+                            height={HEARTBEAT_HEIGHT}
+                        />
+                    </defs>
+                    <g mask={`url(#${id}-mask)`}>
+                        <g ref={track}>
+                            {slots.map(
+                                ({ start, left, width: slotWidth, check }) =>
+                                    check ? (
+                                        <Tooltip key={start}>
+                                            <TooltipTrigger asChild>
+                                                <rect
+                                                    x={left}
+                                                    width={slotWidth}
+                                                    height={HEARTBEAT_HEIGHT}
+                                                    shapeRendering="crispEdges"
+                                                    className={cn(
+                                                        check.successful
+                                                            ? 'fill-emerald-500'
+                                                            : 'fill-red-500',
+                                                    )}
+                                                />
+                                            </TooltipTrigger>
+                                            <TooltipContent>
+                                                {new Date(
+                                                    check.checked_at,
+                                                ).toLocaleTimeString()}{' '}
+                                                ·{' '}
+                                                {check.successful
+                                                    ? 'Up'
+                                                    : 'Down'}{' '}
+                                                ·{' '}
+                                                {formatLatency(
+                                                    check.latency_ms,
+                                                )}
+                                            </TooltipContent>
+                                        </Tooltip>
+                                    ) : (
+                                        <rect
+                                            key={start}
+                                            x={left}
+                                            width={slotWidth}
+                                            height={HEARTBEAT_HEIGHT}
+                                            shapeRendering="crispEdges"
+                                            className="fill-muted"
+                                        />
+                                    ),
+                            )}
+                        </g>
+                    </g>
+                </svg>
             </div>
             <div className="flex justify-between text-xs text-muted-foreground">
                 <span>5 min ago</span>
@@ -498,4 +587,11 @@ export function LiveHeartbeat({ checks }: { checks: LiveCheck[] }) {
             </div>
         </div>
     );
+}
+
+/**
+ * The start of the four-second slot the time falls in, aligned to the clock.
+ */
+function slotStart(time: number): number {
+    return Math.floor(time / SLOT_MS) * SLOT_MS;
 }
