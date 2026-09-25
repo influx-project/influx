@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Concerns\PresentsServiceMonitoring;
 use App\Concerns\QueriesServices;
+use App\Enums\ServiceType;
 use App\Http\Requests\StoreServiceRequest;
 use App\Http\Requests\UpdateServiceRequest;
 use App\Http\Resources\ServiceResource;
@@ -64,6 +65,17 @@ class ServiceController extends Controller
         Gate::authorize('view', $service);
 
         return Inertia::render('services/show', $this->overviewProps($request, $service));
+    }
+
+    /**
+     * Show the host and container metrics reported by the given service's Influx Daemon.
+     */
+    public function daemon(Request $request, Service $service): Response
+    {
+        Gate::authorize('view', $service);
+        abort_unless($service->type === ServiceType::InfluxDaemon, 404);
+
+        return Inertia::render('services/daemon', $this->daemonProps($request, $service));
     }
 
     /**

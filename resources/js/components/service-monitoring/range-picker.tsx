@@ -9,14 +9,17 @@ const shortLabels: Record<TimeRangeValue, string> = {
 };
 
 /**
- * Switches the period the overview's numbers and charts cover.
+ * Switches the period a tab's numbers and charts cover.
  */
 export function RangePicker({
     value,
     options,
+    only = ['range', 'overview', 'status'],
 }: {
     value: TimeRangeValue;
     options: TimeRangeOption[];
+    /** The props to reload for the new range. */
+    only?: string[];
 }) {
     return (
         <ToggleGroup
@@ -28,7 +31,7 @@ export function RangePicker({
                 if (range && range !== value) {
                     router.reload({
                         data: { range },
-                        only: ['range', 'overview', 'status'],
+                        only,
                     });
                 }
             }}

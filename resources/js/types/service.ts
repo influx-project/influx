@@ -179,3 +179,86 @@ export type ServiceAlerts = {
 
 /** A check run for live updates, broadcast over the websocket and never stored. */
 export type LiveCheck = Omit<ServiceCheck, 'id'>;
+
+/** What an Influx Daemon reports about itself and the host it runs on. */
+export type DaemonAgent = {
+    version: string;
+    hostname: string;
+    os: string;
+    kernel: string;
+    arch: string;
+    cpu_model: string;
+    cpu_cores: number;
+    memory_total_bytes: number;
+    boot_time: string;
+    sample_interval_seconds: number;
+    /** Whether the daemon can see a container runtime on its host. */
+    containers_available: boolean;
+};
+
+/** What the panel knows about a service's Influx Daemon. */
+export type ServiceDaemon = {
+    /** Null until the panel has reached the daemon. */
+    agent: DaemonAgent | null;
+    last_seen_at: string | null;
+};
+
+export type DaemonDisk = {
+    mount: string;
+    device: string;
+    filesystem: string;
+    used_bytes: number;
+    total_bytes: number;
+};
+
+export type DaemonContainerState =
+    | 'created'
+    | 'running'
+    | 'paused'
+    | 'restarting'
+    | 'exited'
+    | 'dead';
+
+export type DaemonContainer = {
+    id: string;
+    name: string;
+    image: string;
+    state: DaemonContainerState;
+    /** Null for containers without a health check. */
+    health: 'starting' | 'healthy' | 'unhealthy' | null;
+    started_at: string | null;
+    restart_count: number;
+    /** Resource use is null for containers that are not running. */
+    cpu_percent: number | null;
+    memory_used_bytes: number | null;
+    memory_limit_bytes: number | null;
+};
+
+/** One sample of a daemon's host, as pulled from it and broadcast to live viewers. */
+export type DaemonSample = {
+    collected_at: string;
+    uptime_seconds: number;
+    cpu: {
+        usage_percent: number;
+        load_1: number;
+        load_5: number;
+        load_15: number;
+    };
+    memory: {
+        used_bytes: number;
+        total_bytes: number;
+        swap_used_bytes: number;
+        swap_total_bytes: number;
+    };
+    disks: DaemonDisk[];
+    disk_io: {
+        read_bytes_per_second: number;
+        write_bytes_per_second: number;
+    };
+    network: {
+        rx_bytes_per_second: number;
+        tx_bytes_per_second: number;
+    };
+    /** Null when the daemon cannot see a container runtime. */
+    containers: DaemonContainer[] | null;
+};

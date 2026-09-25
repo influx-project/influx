@@ -1,5 +1,12 @@
 import { Link, setLayoutProps } from '@inertiajs/react';
-import { Activity, Bell, Info, LayoutDashboard, Settings } from 'lucide-react';
+import {
+    Activity,
+    Bell,
+    Info,
+    LayoutDashboard,
+    Server,
+    Settings,
+} from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { ImportanceBadge, ServiceEndpoint } from '@/components/service-badges';
@@ -12,11 +19,23 @@ import type { Service, ServiceStatus } from '@/types';
 
 type ServiceTab = keyof Pick<
     ServiceRoutes,
-    'show' | 'downtime' | 'alerts' | 'information' | 'edit'
+    'show' | 'daemon' | 'downtime' | 'alerts' | 'information' | 'edit'
 >;
 
-const tabs: { key: ServiceTab; title: string; icon: LucideIcon }[] = [
+const tabs: {
+    key: ServiceTab;
+    title: string;
+    icon: LucideIcon;
+    /** Limits the tab to the services it applies to. */
+    shownFor?: (service: Service) => boolean;
+}[] = [
     { key: 'show', title: 'Overview', icon: LayoutDashboard },
+    {
+        key: 'daemon',
+        title: 'Daemon',
+        icon: Server,
+        shownFor: (service) => service.type === 'influx_daemon',
+    },
     { key: 'downtime', title: 'Downtime', icon: Activity },
     { key: 'alerts', title: 'Alerts', icon: Bell },
     { key: 'information', title: 'Information', icon: Info },
@@ -87,7 +106,11 @@ export default function ServiceLayout({
                     className="-mb-px flex gap-1 overflow-x-auto"
                     aria-label={`${service.name} sections`}
                 >
-                    {tabs.map(({ key, title, icon: Icon }) => {
+                    {tabs.map(({ key, title, icon: Icon, shownFor }) => {
+                        if (shownFor && !shownFor(service)) {
+                            return null;
+                        }
+
                         const href = routes[key](service.id);
                         const active = key === tab || isCurrentUrl(href);
 

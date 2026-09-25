@@ -107,3 +107,41 @@ export function formatRelative(
 
     return relativeFormatter.format(seconds, 'second');
 }
+
+/**
+ * Format a number of bytes using binary units, e.g. `1.5 GiB`.
+ */
+export function formatBytes(bytes: number | null): string {
+    if (bytes === null) {
+        return '—';
+    }
+
+    const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'];
+    let value = bytes;
+    let unit = 0;
+
+    while (value >= 1024 && unit < units.length - 1) {
+        value /= 1024;
+        unit++;
+    }
+
+    return `${unit === 0 || value >= 100 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
+}
+
+/**
+ * Format a transfer rate in bytes per second, e.g. `12.4 MiB/s`.
+ */
+export function formatRate(bytesPerSecond: number | null): string {
+    return bytesPerSecond === null ? '—' : `${formatBytes(bytesPerSecond)}/s`;
+}
+
+/**
+ * Format a percentage to one decimal place below 10%, e.g. `4.2%` or `63%`.
+ */
+export function formatPercent(percent: number | null): string {
+    if (percent === null) {
+        return '—';
+    }
+
+    return `${percent < 10 ? percent.toFixed(1) : Math.round(percent)}%`;
+}

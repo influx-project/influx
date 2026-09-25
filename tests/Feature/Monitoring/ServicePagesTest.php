@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Monitoring;
 
+use App\Enums\ServiceType;
 use App\Models\Incident;
 use App\Models\Metric;
 use App\Models\Service;
@@ -75,6 +76,60 @@ class ServicePagesTest extends TestCase
                     $page->has($prop);
                 }
             });
+    }
+
+    public function test_owners_can_view_the_daemon_tab_of_an_influx_daemon_service()
+    {
+        $user = User::factory()->create();
+        $service = Service::factory()->for($user, 'owner')->create(['type' => ServiceType::InfluxDaemon]);
+
+        $this->actingAs($user)
+            ->get(route('services.daemon', [$service, 'range' => '7d']))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('services/daemon')
+                ->where('service.id', $service->id)
+                ->where('status.state', 'unsupported')
+                ->where('range', '7d')
+                ->has('ranges', 3)
+                ->where('daemon.agent', null)
+                ->where('daemon.last_seen_at', null));
+    }
+
+    public function test_admins_can_view_the_daemon_tab_of_any_influx_daemon_service()
+    {
+        $service = Service::factory()->unassigned()->create(['type' => ServiceType::InfluxDaemon]);
+
+        $this->actingAs(User::factory()->admin()->create())
+            ->get(route('admin.services.daemon', $service))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('admin/services/daemon')
+                ->where('range', '24h')
+                ->has('daemon'));
+    }
+
+    public function test_other_users_cannot_see_the_daemon_tab()
+    {
+        $service = Service::factory()->create(['type' => ServiceType::InfluxDaemon]);
+
+        $this->actingAs(User::factory()->create())
+            ->get(route('services.daemon', $service))
+            ->assertNotFound();
+    }
+
+    public function test_services_of_other_types_have_no_daemon_tab()
+    {
+        $user = User::factory()->create();
+        $service = Service::factory()->for($user, 'owner')->create();
+
+        $this->actingAs($user)
+            ->get(route('services.daemon', $service))
+            ->assertNotFound();
+
+        $this->actingAs(User::factory()->admin()->create())
+            ->get(route('admin.services.daemon', $service))
+            ->assertNotFound();
     }
 
     public function test_the_overview_range_can_be_chosen()

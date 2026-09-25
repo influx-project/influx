@@ -11,6 +11,7 @@ type ServiceRoute = (id: number) => RouteDefinition<'get'>;
  */
 export type ServiceRoutes = {
     show: ServiceRoute;
+    daemon: ServiceRoute;
     downtime: ServiceRoute;
     alerts: ServiceRoute;
     information: ServiceRoute;
@@ -21,6 +22,7 @@ export type ServiceRoutes = {
 
 export const userServiceRoutes: ServiceRoutes = {
     show: services.show,
+    daemon: services.daemon,
     downtime: services.downtime,
     alerts: services.alerts,
     information: services.information,
@@ -30,6 +32,7 @@ export const userServiceRoutes: ServiceRoutes = {
 
 export const adminServiceRoutes: ServiceRoutes = {
     show: adminServices.show,
+    daemon: adminServices.daemon,
     downtime: adminServices.downtime,
     alerts: adminServices.alerts,
     information: adminServices.information,

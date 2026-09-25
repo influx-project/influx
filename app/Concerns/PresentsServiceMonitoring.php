@@ -45,6 +45,28 @@ trait PresentsServiceMonitoring
     }
 
     /**
+     * Get the props for the daemon tab: what the Influx Daemon reported about its host and containers.
+     *
+     * The panel does not pull from the daemon yet (see docs/influx-daemon.md), so nothing has been reported.
+     *
+     * @return array<string, mixed>
+     */
+    protected function daemonProps(Request $request, Service $service): array
+    {
+        $range = TimeRange::tryFrom((string) $request->query('range')) ?? TimeRange::Day;
+
+        return [
+            ...$this->serviceTabProps($service),
+            'range' => $range->value,
+            'ranges' => TimeRange::options(),
+            'daemon' => [
+                'agent' => null,
+                'last_seen_at' => null,
+            ],
+        ];
+    }
+
+    /**
      * Get the props for the downtime tab: uptime, daily history and incidents.
      *
      * @return array<string, mixed>
