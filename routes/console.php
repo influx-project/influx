@@ -15,8 +15,8 @@ Artisan::command('inspire', function () {
 // Overlap locks expire after a minute, so a run that was killed mid-way cannot block these for a day.
 Schedule::command(CollectServiceMetrics::class)->everyTenSeconds()->withoutOverlapping(1);
 
-// Live checks run at least 3 seconds apart, so checking for watchers every 2 seconds
-// gives each watched service a fresh result every 4 seconds or so.
-Schedule::command(StreamLiveChecks::class)->everyTwoSeconds()->withoutOverlapping(1);
+// Live checks start when someone starts watching and stop when they leave; this only
+// restarts any that broke along the way.
+Schedule::command(StreamLiveChecks::class)->everyMinute()->withoutOverlapping(1);
 
 Schedule::command('model:prune', ['--model' => [Metric::class]])->daily();

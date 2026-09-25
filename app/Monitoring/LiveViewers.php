@@ -2,6 +2,7 @@
 
 namespace App\Monitoring;
 
+use App\Events\LiveCheckCompleted;
 use Illuminate\Broadcasting\Broadcasters\PusherBroadcaster;
 use Illuminate\Contracts\Broadcasting\Factory as BroadcastFactory;
 use Illuminate\Support\Facades\Log;
@@ -22,26 +23,49 @@ class LiveViewers
      */
     public function watchedServiceIds(): array
     {
+        $response = $this->request('/channels', ['filter_by_prefix' => 'private-services.']);
+        $channels = is_array($response['channels'] ?? null) ? $response['channels'] : [];
+
+        return self::serviceIdsFromChannels(array_keys($channels));
+    }
+
+    /**
+     * Determine whether anyone is watching the service live right now.
+     */
+    public function isWatched(int $serviceId): bool
+    {
+        $response = $this->request('/channels/private-'.LiveCheckCompleted::channelName($serviceId));
+
+        return ($response['occupied'] ?? false) === true;
+    }
+
+    /**
+     * Query the WebSocket server's HTTP API, returning the decoded body or null if it cannot be reached.
+     *
+     * Decoded as arrays rather than via the SDK's getChannels(), which throws when no channels
+     * are occupied because the server then sends `"channels": []`.
+     *
+     * @param  array<string, string>  $params
+     * @return array<string, mixed>|null
+     */
+    protected function request(string $path, array $params = []): ?array
+    {
         try {
             $broadcaster = $this->broadcast->connection();
 
-            // Only Pusher-compatible servers such as Reverb can list their channels.
+            // Only Pusher-compatible servers such as Reverb have this API.
             if (! $broadcaster instanceof PusherBroadcaster) {
-                return [];
+                return null;
             }
 
-            // Decoded as arrays rather than via the SDK's getChannels(), which throws when
-            // no channels are occupied because the server then sends `"channels": []`.
-            $response = $broadcaster->getPusher()->get('/channels', ['filter_by_prefix' => 'private-services.'], true);
+            $response = $broadcaster->getPusher()->get($path, $params, true);
         } catch (Throwable $e) {
-            Log::warning('Could not list live channels from the WebSocket server.', ['exception' => $e->getMessage()]);
+            Log::warning('Could not query the WebSocket server.', ['path' => $path, 'exception' => $e->getMessage()]);
 
-            return [];
+            return null;
         }
 
-        $channels = is_array($response) && is_array($response['channels'] ?? null) ? $response['channels'] : [];
-
-        return self::serviceIdsFromChannels(array_keys($channels));
+        return is_array($response) ? $response : null;
     }
 
     /**

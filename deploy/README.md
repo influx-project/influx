@@ -7,10 +7,10 @@ Everything runs with Docker Compose on a single server. You can run it with HTTP
 | Service      | What it does                                                                                  |
 | ------------ | --------------------------------------------------------------------------------------------- |
 | `web`        | The website on ports 80/443 (FrankenPHP with Caddy). Also passes live-update WebSockets to `reverb`. |
-| `reverb`     | WebSocket server for live updates.                                                            |
+| `reverb`     | WebSocket server for live updates. Starts live checks when someone opens a service's live view. |
 | `queue`      | Runs background checks and other queued jobs.                                                 |
-| `queue-live` | Runs live checks for people watching a service, so they never wait behind background checks.  |
-| `scheduler`  | Queues background checks (every 10 s), live checks (every 2 s) and prunes old metrics daily.  |
+| `queue-live` | Runs live checks every ~4 s while someone is watching a service; they stop when the last viewer leaves. |
+| `scheduler`  | Queues background checks (every 10 s), restarts any stalled live checks (every minute) and prunes old metrics daily. |
 | `migrate`    | Runs database migrations on start, then exits. The other app services wait for it.            |
 | `postgres`   | Database.                                                                                     |
 | `redis`      | Cache, sessions and job queues.                                                               |
@@ -189,7 +189,7 @@ Check `docker compose logs web`. Usually the domain's DNS doesn't point at this 
 Check that `reverb` is running (`docker compose ps`). If you use your own reverse proxy, it must forward WebSocket upgrades on `/app/`.
 
 **Live status connects but says there are no live results.**
-Check that `scheduler` and `queue-live` are running, and look at `docker compose logs scheduler queue-live`.
+Check that `queue-live` and `reverb` are running, and look at `docker compose logs reverb queue-live`. Reverb starts the checks when someone subscribes; if they stopped (for example after a worker restart), `scheduler` restarts them within a minute.
 
 **No background check results appear.**
 Check `scheduler` and `queue`. If many checks time out, `queue` can fall behind; add workers with `--scale queue=3`.

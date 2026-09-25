@@ -12,16 +12,14 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Cache;
 
 #[Signature('services:stream-live')]
-#[Description('Queue a live check for every service someone is watching live')]
+#[Description('Restart live checks for any watched service whose checks have stopped')]
 class StreamLiveChecks extends Command
 {
     /**
-     * The minimum number of seconds between live checks of the same service.
-     */
-    public const INTERVAL = 3;
-
-    /**
      * Execute the console command.
+     *
+     * Live checks start when someone starts watching and keep themselves going, so this
+     * is only a safety net for chains that broke, e.g. when a worker was killed mid-job.
      */
     public function handle(LiveViewers $viewers): int
     {
@@ -31,22 +29,21 @@ class StreamLiveChecks extends Command
             return self::SUCCESS;
         }
 
-        $queued = 0;
+        $restarted = 0;
 
         Service::query()
             ->whereKey($ids)
             ->where('enabled', true)
             ->where('stream_metrics', true)
             ->whereIn('type', ServiceType::collectable())
-            ->each(function (Service $service) use (&$queued): void {
-                // Space live checks out, however often the command runs.
-                if (Cache::add("live-check:{$service->id}", true, self::INTERVAL)) {
+            ->each(function (Service $service) use (&$restarted): void {
+                if (! Cache::has(StreamLiveCheck::lastCheckKey($service->id))) {
                     StreamLiveCheck::dispatch($service);
-                    $queued++;
+                    $restarted++;
                 }
             });
 
-        $this->components->info("Queued {$queued} live ".str('check')->plural($queued).'.');
+        $this->components->info("Restarted live checks for {$restarted} ".str('service')->plural($restarted).'.');
 
         return self::SUCCESS;
     }

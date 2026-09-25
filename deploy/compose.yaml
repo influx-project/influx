@@ -73,7 +73,7 @@ services:
       redis:
         condition: service_healthy
 
-  # WebSocket server for live updates.
+  # WebSocket server for live updates. Also starts live checks when someone starts watching a service.
   reverb:
     <<: *app
     command: ["php", "artisan", "reverb:start", "--no-interaction"]
@@ -87,8 +87,8 @@ services:
     stop_grace_period: 2m
     depends_on: *after-migrate
 
-  # Live checks for people watching a service, on their own worker so they never
-  # wait behind slow background checks.
+  # Live checks every ~4 s for services someone is watching, on their own worker so they
+  # never wait behind slow background checks. Nothing runs when no one is watching.
   queue-live:
     <<: *app
     command:
@@ -96,7 +96,7 @@ services:
     stop_grace_period: 1m
     depends_on: *after-migrate
 
-  # Queues background checks every 10 s, live checks every 2 s, and prunes old metrics daily.
+  # Queues background checks every 10 s, restarts stalled live checks every minute, and prunes old metrics daily.
   scheduler:
     <<: *app
     command: ["php", "artisan", "schedule:work", "--no-interaction"]

@@ -2,21 +2,23 @@
 
 namespace Tests\Feature\Monitoring;
 
-use App\Console\Commands\StreamLiveChecks;
 use App\Enums\ServiceType;
 use App\Events\LiveCheckCompleted;
 use App\Jobs\StreamLiveCheck;
+use App\Listeners\StartLiveChecks;
 use App\Models\Service;
 use App\Models\User;
 use App\Monitoring\Checkers\TcpChecker;
 use App\Monitoring\CheckResult;
 use App\Monitoring\LiveViewers;
-use App\Monitoring\ServiceMonitor;
 use Illuminate\Broadcasting\Broadcasters\PusherBroadcaster;
 use Illuminate\Contracts\Broadcasting\Factory as BroadcastFactory;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Queue;
+use Laravel\Reverb\Events\ChannelCreated;
+use Laravel\Reverb\Protocols\Pusher\Channels\Channel;
 use Mockery;
 use Mockery\MockInterface;
 use Pusher\Pusher;
@@ -94,6 +96,12 @@ class LiveUpdatesTest extends TestCase
         $this->assertSame([], $this->viewersWithChannels([])->watchedServiceIds());
     }
 
+    public function test_a_single_service_is_watched_while_its_channel_is_occupied()
+    {
+        $this->assertTrue($this->viewersWithResponse('/channels/private-services.3.live', ['occupied' => true])->isWatched(3));
+        $this->assertFalse($this->viewersWithResponse('/channels/private-services.3.live', ['occupied' => false])->isWatched(3));
+    }
+
     /**
      * Make a viewers lookup backed by a WebSocket server reporting the given occupied channels.
      *
@@ -101,10 +109,19 @@ class LiveUpdatesTest extends TestCase
      */
     protected function viewersWithChannels(array $channels): LiveViewers
     {
+        return $this->viewersWithResponse('/channels', ['channels' => $channels], ['filter_by_prefix' => 'private-services.']);
+    }
+
+    /**
+     * Make a viewers lookup backed by a WebSocket server that answers the given API path.
+     *
+     * @param  array<string, mixed>  $response
+     * @param  array<string, string>  $params
+     */
+    protected function viewersWithResponse(string $path, array $response, array $params = []): LiveViewers
+    {
         $pusher = Mockery::mock(Pusher::class);
-        $pusher->shouldReceive('get')
-            ->with('/channels', ['filter_by_prefix' => 'private-services.'], true)
-            ->andReturn(['channels' => $channels]);
+        $pusher->shouldReceive('get')->with($path, $params, true)->andReturn($response);
 
         $broadcast = Mockery::mock(BroadcastFactory::class);
         $broadcast->shouldReceive('connection')->andReturn(new PusherBroadcaster($pusher));
@@ -112,31 +129,138 @@ class LiveUpdatesTest extends TestCase
         return new LiveViewers($broadcast);
     }
 
-    public function test_only_watched_services_with_live_updates_on_are_checked_a_few_seconds_apart()
+    /**
+     * Report the given services as watched, and every other service as not.
+     *
+     * @param  list<int>  $ids
+     */
+    protected function watching(array $ids): void
+    {
+        $this->mock(LiveViewers::class, function (MockInterface $mock) use ($ids) {
+            $mock->shouldReceive('watchedServiceIds')->andReturn($ids);
+            $mock->shouldReceive('isWatched')->andReturnUsing(fn (int $id) => in_array($id, $ids, true));
+        });
+    }
+
+    /**
+     * Make TCP checks succeed with the given latency.
+     */
+    protected function fakeTcpUp(float $latency = 42.5): void
+    {
+        $this->app->instance(TcpChecker::class, new class($latency) extends TcpChecker
+        {
+            public function __construct(private float $latency) {}
+
+            public function check(Service $service): CheckResult
+            {
+                return CheckResult::up($this->latency);
+            }
+        });
+    }
+
+    /**
+     * Reverb's event for a channel getting its first subscriber. The channel is mocked, since
+     * real channels can only be created inside the Reverb server.
+     */
+    protected function channelCreated(string $name): ChannelCreated
+    {
+        $channel = Mockery::mock(Channel::class);
+        $channel->shouldReceive('name')->andReturn($name);
+
+        return new ChannelCreated($channel);
+    }
+
+    public function test_watching_a_service_starts_its_live_checks()
     {
         Queue::fake();
-
-        $watched = Service::factory()->create();
+        $service = Service::factory()->create();
         $liveOff = Service::factory()->create(['stream_metrics' => false]);
-        $disabled = Service::factory()->disabled()->create();
+
+        (new StartLiveChecks)->handle($this->channelCreated("private-services.{$service->id}.live"));
+        (new StartLiveChecks)->handle($this->channelCreated("private-services.{$liveOff->id}.live"));
+        (new StartLiveChecks)->handle($this->channelCreated('private-App.Models.User.1'));
+
+        Queue::assertPushedOn(StreamLiveCheck::QUEUE, StreamLiveCheck::class, fn (StreamLiveCheck $job) => $job->service->is($service));
+        Queue::assertPushed(StreamLiveCheck::class, 1);
+    }
+
+    public function test_a_live_check_broadcasts_its_result_and_queues_the_next_one()
+    {
+        $this->freezeSecond();
+        Queue::fake();
+        Event::fake([LiveCheckCompleted::class]);
+        $this->fakeTcpUp(42.5);
+        $service = Service::factory()->create();
+        $this->watching([$service->id]);
+
+        app()->call([new StreamLiveCheck($service), 'handle']);
+
+        Event::assertDispatched(LiveCheckCompleted::class, fn (LiveCheckCompleted $event) => $event->service->is($service)
+            && $event->broadcastWith()['successful'] === true
+            && $event->broadcastWith()['latency_ms'] === 42.5);
+        Queue::assertPushedOn(StreamLiveCheck::QUEUE, StreamLiveCheck::class, fn (StreamLiveCheck $job) => $job->service->is($service)
+            && now()->addSeconds(StreamLiveCheck::INTERVAL)->equalTo($job->delay));
+        $this->assertSame(0, $service->metrics()->count(), 'Live checks are not recorded.');
+        $this->assertSame(0, $service->incidents()->count());
+        $this->assertNull($service->fresh()->last_checked_at);
+    }
+
+    public function test_live_checks_stop_when_no_one_is_watching()
+    {
+        Queue::fake();
+        Event::fake([LiveCheckCompleted::class]);
+        $service = Service::factory()->create();
+        $this->watching([]);
+
+        app()->call([new StreamLiveCheck($service), 'handle']);
+
+        Event::assertNotDispatched(LiveCheckCompleted::class);
+        Queue::assertNothingPushed();
+    }
+
+    public function test_live_checks_stop_once_live_updates_are_switched_off()
+    {
+        Queue::fake();
+        Event::fake([LiveCheckCompleted::class]);
+        $service = Service::factory()->create(['stream_metrics' => false]);
+        $this->watching([$service->id]);
+
+        app()->call([new StreamLiveCheck($service), 'handle']);
+
+        Event::assertNotDispatched(LiveCheckCompleted::class);
+        Queue::assertNothingPushed();
+    }
+
+    public function test_a_second_chain_for_the_same_service_ends_itself()
+    {
+        Queue::fake();
+        Event::fake([LiveCheckCompleted::class]);
+        $this->fakeTcpUp();
+        $service = Service::factory()->create();
+        $this->watching([$service->id]);
+
+        app()->call([new StreamLiveCheck($service), 'handle']);
+        app()->call([new StreamLiveCheck($service), 'handle']);
+
+        Event::assertDispatchedTimes(LiveCheckCompleted::class, 1);
+        Queue::assertPushed(StreamLiveCheck::class, 1);
+    }
+
+    public function test_the_safety_net_restarts_only_watched_services_whose_checks_stopped()
+    {
+        Queue::fake();
+        $stalled = Service::factory()->create();
+        $running = Service::factory()->create();
+        $liveOff = Service::factory()->create(['stream_metrics' => false]);
         $daemon = Service::factory()->create(['type' => ServiceType::InfluxDaemon]);
         Service::factory()->create();
+        Cache::put(StreamLiveCheck::lastCheckKey($running->id), true, StreamLiveCheck::STALE_AFTER);
+        $this->watching([$stalled->id, $running->id, $liveOff->id, $daemon->id]);
 
-        $this->mock(LiveViewers::class, fn (MockInterface $mock) => $mock
-            ->shouldReceive('watchedServiceIds')
-            ->andReturn([$watched->id, $liveOff->id, $disabled->id, $daemon->id]));
+        $this->artisan('services:stream-live')->expectsOutputToContain('Restarted live checks for 1 service.');
 
-        $this->artisan('services:stream-live')->expectsOutputToContain('Queued 1 live check.');
-        Queue::assertPushedOn(StreamLiveCheck::QUEUE, StreamLiveCheck::class, fn (StreamLiveCheck $job) => $job->service->is($watched));
-
-        // Throttled: the service was checked less than three seconds ago.
-        $this->artisan('services:stream-live')->expectsOutputToContain('Queued 0 live checks.');
-
-        $this->travel(StreamLiveChecks::INTERVAL)->seconds();
-        $this->artisan('services:stream-live')->expectsOutputToContain('Queued 1 live check.');
-
-        // The first check has not run yet, so the job's unique lock stops a second one piling up behind it.
         Queue::assertPushed(StreamLiveCheck::class, 1);
+        Queue::assertPushed(StreamLiveCheck::class, fn (StreamLiveCheck $job) => $job->service->is($stalled));
     }
 
     public function test_the_command_does_nothing_when_no_one_is_watching()
@@ -147,38 +271,6 @@ class LiveUpdatesTest extends TestCase
         $this->artisan('services:stream-live')->assertSuccessful();
 
         Queue::assertNothingPushed();
-    }
-
-    public function test_live_checks_are_broadcast_but_not_recorded()
-    {
-        Event::fake([LiveCheckCompleted::class]);
-        $this->app->instance(TcpChecker::class, new class extends TcpChecker
-        {
-            public function check(Service $service): CheckResult
-            {
-                return CheckResult::up(42.5);
-            }
-        });
-        $service = Service::factory()->create();
-
-        (new StreamLiveCheck($service))->handle(app(ServiceMonitor::class));
-
-        Event::assertDispatched(LiveCheckCompleted::class, fn (LiveCheckCompleted $event) => $event->service->is($service)
-            && $event->broadcastWith()['successful'] === true
-            && $event->broadcastWith()['latency_ms'] === 42.5);
-        $this->assertSame(0, $service->metrics()->count());
-        $this->assertSame(0, $service->incidents()->count());
-        $this->assertNull($service->fresh()->last_checked_at);
-    }
-
-    public function test_live_checks_stop_once_live_updates_are_switched_off()
-    {
-        Event::fake([LiveCheckCompleted::class]);
-        $service = Service::factory()->create(['stream_metrics' => false]);
-
-        (new StreamLiveCheck($service))->handle(app(ServiceMonitor::class));
-
-        Event::assertNotDispatched(LiveCheckCompleted::class);
     }
 
     public function test_live_check_events_broadcast_on_the_services_private_channel()
